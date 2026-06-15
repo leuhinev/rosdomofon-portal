@@ -46,3 +46,19 @@ func (m *JWTManager) Verify(tokenStr string) (*Claims, error) {
 	}
 	return claims, nil
 }
+
+// Новый метод для refresh token
+func (m *JWTManager) Refresh(tokenStr string) (string, error) {
+	claims, err := m.Verify(tokenStr)
+	if err != nil {
+		return "", err
+	}
+
+	// Проверяем, что токен еще не истек (можно обновить за 7 дней до истечения)
+	if time.Until(claims.ExpiresAt.Time) > 7*24*time.Hour {
+		return "", errors.New("token too early to refresh")
+	}
+
+	// Генерируем новый токен
+	return m.Generate(claims.OwnerID, claims.FlatIDs)
+}

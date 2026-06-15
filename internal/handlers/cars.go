@@ -166,7 +166,6 @@ func (h *CarsHandler) UpdateCar(w http.ResponseWriter, r *http.Request) {
 
 	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
 
-	// Находим flat_id автомобиля
 	cars, _ := h.storage.GetCarsByFlatIDs(allowedFlats)
 	var flatID int
 	for _, car := range cars {
@@ -189,6 +188,56 @@ func (h *CarsHandler) UpdateCar(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+}
+
+func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Path[len("/api/cars/extend/"):]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		AdditionalDays int `json:"additional_days"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
+
+	cars, _ := h.storage.GetCarsByFlatIDs(allowedFlats)
+	var flatID int
+	var carFound *storage.Car
+	for _, car := range cars {
+		if car.ID == id {
+			flatID = car.FlatID
+			carFound = &car
+			break
+		}
+	}
+
+	if flatID == 0 {
+		http.Error(w, `{"error":"car not found"}`, http.StatusNotFound)
+		return
+	}
+
+	daysUntilExpiry := int(time.Until(carFound.ExpiresAt).Hours() / 24)
+	if daysUntilExpiry > 7 {
+		http.Error(w, `{"error":"can only extend within 7 days of expiry"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.storage.ExtendCarExpiry(id, flatID, req.AdditionalDays); err != nil {
+		slog.Error("failed to extend car", "error", err)
+		http.Error(w, `{"error":"failed to extend"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "extended"})
 }
 
 func (h *CarsHandler) DeleteCar(w http.ResponseWriter, r *http.Request) {

@@ -11,12 +11,22 @@ type Storage struct {
 	DB *gorm.DB
 }
 
-// Удаляем таблицу owners - она не нужна
+// Таблица для номеров автомобилей (отдельно)
+type PlateNumber struct {
+	ID          int    `gorm:"primaryKey;autoIncrement"`
+	PlateNumber string `gorm:"type:varchar(15);not null;uniqueIndex"`
+	CreatedAt   int64  `gorm:"autoCreateTime"`
+}
 
+func (PlateNumber) TableName() string {
+	return "plate_numbers"
+}
+
+// Таблица для автомобилей (связь с номерами)
 type UserCar struct {
 	ID             int    `gorm:"primaryKey;autoIncrement"`
-	FlatID         int    `gorm:"not null;index"` // Только flat_id
-	PlateNumber    string `gorm:"type:varchar(15);not null;index"`
+	FlatID         int    `gorm:"not null;index"`
+	PlateID        int    `gorm:"not null;index"`
 	Comment        string `gorm:"type:text"`
 	AutoOpen       bool   `gorm:"default:false"`
 	NotifyOnDetect bool   `gorm:"default:false"`
@@ -31,9 +41,22 @@ func (UserCar) TableName() string {
 	return "user_cars"
 }
 
+// Таблица для фотографий автомобилей
+type CarPhotoDB struct {
+	ID        int    `gorm:"primaryKey;autoIncrement"`
+	CarID     int    `gorm:"not null;index"`
+	PhotoData string `gorm:"type:longtext;not null"`
+	IsMain    bool   `gorm:"default:false"`
+	CreatedAt int64  `gorm:"autoCreateTime"`
+}
+
+func (CarPhotoDB) TableName() string {
+	return "car_photos"
+}
+
 type UserKey struct {
 	ID        int    `gorm:"primaryKey;autoIncrement"`
-	FlatID    int    `gorm:"not null;index"` // Только flat_id
+	FlatID    int    `gorm:"not null;index"`
 	KeyData   string `gorm:"type:varchar(64);not null;uniqueIndex:idx_flat_key"`
 	Comment   string `gorm:"type:text"`
 	CreatedAt int64  `gorm:"autoCreateTime"`
@@ -53,8 +76,8 @@ func NewMySQL(dsn string) (*Storage, error) {
 		return nil, err
 	}
 
-	// Автоматическая миграция (без таблицы owners)
-	err = db.AutoMigrate(&UserCar{}, &UserKey{})
+	// Автоматическая миграция
+	err = db.AutoMigrate(&PlateNumber{}, &UserCar{}, &CarPhotoDB{}, &UserKey{})
 	if err != nil {
 		slog.Error("failed to migrate database", "error", err)
 		return nil, err

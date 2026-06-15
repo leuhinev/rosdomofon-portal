@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+<!-- Индикатор загрузки -->
+<div id="loading-overlay" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Загрузка портала...</div>
+</div>
+
 <div id="app">
     <!-- Экран авторизации -->
     <div id="auth-screen" class="screen active">
@@ -91,6 +97,7 @@
         </div>
     </div>
 </div>
-<script src="/static/app.js"></script>
+
+<script type="module" src="/static/app.js"></script>
 </body>
 </html>

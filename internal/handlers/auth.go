@@ -28,8 +28,6 @@ func NewAuthHandler(jm *auth.JWTManager, cm *auth.CodeManager, rc *rosdomofon.Cl
 }
 
 func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
-	slog.Info("send-code request received")
-
 	var req struct {
 		Phone string `json:"phone"`
 	}
@@ -39,9 +37,6 @@ func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("processing phone", "phone", req.Phone)
-
-	// Проверяем формат с +7 или без
 	phoneRegex := regexp.MustCompile(`^(?:\+7|7|8)?(\d{10})$`)
 	matches := phoneRegex.FindStringSubmatch(req.Phone)
 	if matches == nil {
@@ -50,7 +45,6 @@ func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Нормализуем номер в формат +79XXXXXXXXX
 	normalizedPhone := "+7" + matches[1]
 	slog.Info("normalized phone", "original", req.Phone, "normalized", normalizedPhone)
 
@@ -82,7 +76,6 @@ func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Извлекаем цифры для отправки push
 	phoneInt, err := strconv.ParseInt(normalizedPhone[1:], 10, 64)
 	if err != nil {
 		slog.Error("failed to parse phone to int", "error", err)
@@ -117,7 +110,6 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Нормализуем номер
 	phoneRegex := regexp.MustCompile(`^(?:\+7|7|8)?(\d{10})$`)
 	matches := phoneRegex.FindStringSubmatch(req.Phone)
 	if matches == nil {
@@ -154,4 +146,31 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("user verified successfully", "phone", normalizedPhone, "owner_id", ownerID)
 	json.NewEncoder(w).Encode(map[string]string{"access_token": token})
+}
+
+// Новый метод для refresh token
+func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		slog.Error("failed to decode refresh request", "error", err)
+		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Token == "" {
+		http.Error(w, `{"error":"token required"}`, http.StatusBadRequest)
+		return
+	}
+
+	newToken, err := h.jwtManager.Refresh(req.Token)
+	if err != nil {
+		slog.Error("failed to refresh token", "error", err)
+		http.Error(w, `{"error":"refresh failed"}`, http.StatusUnauthorized)
+		return
+	}
+
+	slog.Info("token refreshed successfully")
+	json.NewEncoder(w).Encode(map[string]string{"access_token": newToken})
 }
