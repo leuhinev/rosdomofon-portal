@@ -1,0 +1,10 @@
+.kitchen
+./bin/.*
+.idea
+*.swp
+*.swo
+/nodes/
+Berksfile.lock
+.ruby-version
+*.yaml
+./config.yaml

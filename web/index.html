@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>РосДомофон Портал</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="app">
+    <!-- Экран авторизации -->
+    <div id="auth-screen" class="screen active">
+        <div class="container">
+            <div class="logo">
+                <h1>🏠 РосДомофон</h1>
+                <p>Портал управления доступом</p>
+            </div>
+
+            <form id="auth-form">
+                <div class="form-group">
+                    <label for="phone">Номер телефона</label>
+                    <div class="phone-input">
+                        <span class="phone-prefix">+7</span>
+                        <input type="tel" id="phone" placeholder="1234567890" maxlength="10" pattern="\d{10}" inputmode="numeric" autocomplete="off">
+                    </div>
+                    <small class="hint">Введите 10 цифр вашего номера телефона</small>
+                </div>
+
+                <div id="code-section" style="display:none;">
+                    <div class="form-group">
+                        <label for="code">Код подтверждения</label>
+                        <input type="text" id="code" placeholder="Введите 6-значный код" maxlength="6" inputmode="numeric" autocomplete="off">
+                        <small class="hint">Код отправлен в push-уведомление</small>
+                    </div>
+                </div>
+
+                <button type="submit" id="submit-btn" class="primary-btn">Получить код</button>
+            </form>
+
+            <div id="message"></div>
+        </div>
+    </div>
+
+    <!-- Основной портал -->
+    <div id="portal-screen" class="screen">
+        <div class="container">
+            <div class="header">
+                <div class="header-title">
+                    <h1>🏠 Управление доступом</h1>
+                </div>
+                <button id="logout-btn" class="logout-btn">🚪 Выйти</button>
+            </div>
+
+            <div class="tabs" id="tabs">
+                <button class="tab-btn active" data-tab="cars">🚗 Автомобили</button>
+                <button class="tab-btn" data-tab="keys">🔑 Ключи</button>
+            </div>
+
+            <div id="cars-tab" class="tab-content active">
+                <button id="add-car-btn" class="add-btn">+ Добавить автомобиль</button>
+                <div id="cars-list" class="items-list"></div>
+            </div>
+
+            <div id="keys-tab" class="tab-content">
+                <button id="add-key-btn" class="add-btn">+ Добавить ключ</button>
+                <div id="keys-list" class="items-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для форм -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Модальное окно для подтверждения удаления -->
+    <div id="confirm-modal" class="modal">
+        <div class="modal-content confirm-modal">
+            <span class="close-confirm">&times;</span>
+            <div id="confirm-body">
+                <h3>🗑️ Подтверждение удаления</h3>
+                <p id="confirm-message">Вы уверены, что хотите удалить?</p>
+                <div class="confirm-buttons">
+                    <button id="confirm-yes" class="confirm-btn danger">Да, удалить</button>
+                    <button id="confirm-no" class="confirm-btn secondary">Отмена</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
