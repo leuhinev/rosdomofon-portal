@@ -2,7 +2,6 @@ package storage
 
 import (
 	"gorm.io/gorm"
-	"log/slog"
 	"time"
 )
 
@@ -62,12 +61,7 @@ func (s *Storage) CreateCar(car *Car) error {
 	car.ID = dbCar.ID
 	car.CreatedAt = time.Unix(dbCar.CreatedAt, 0)
 	car.UpdatedAt = time.Unix(dbCar.UpdatedAt, 0)
-
-	for _, photo := range car.Photos {
-		if err := s.AddCarPhoto(car.ID, photo.PhotoData, photo.IsMain); err != nil {
-			slog.Warn("failed to save photo", "error", err)
-		}
-	}
+	car.PlateID = plateID
 
 	return nil
 }
@@ -88,16 +82,18 @@ func (s *Storage) GetCarsByFlatIDs(flatIDs []int) ([]Car, error) {
 		var plate PlateNumber
 		s.DB.First(&plate, dbCar.PlateID)
 
+		// Получаем фото по plate_id (номеру), а не по car_id
 		var dbPhotos []CarPhotoDB
-		s.DB.Where("car_id = ?", dbCar.ID).Find(&dbPhotos)
+		s.DB.Where("plate_id = ?", plate.ID).Order("is_main DESC").Find(&dbPhotos)
 
 		photos := make([]CarPhotoDB, len(dbPhotos))
 		for j, p := range dbPhotos {
 			photos[j] = CarPhotoDB{
 				ID:        p.ID,
-				CarID:     p.CarID,
+				PlateID:   p.PlateID,
 				PhotoData: p.PhotoData,
 				IsMain:    p.IsMain,
+				CreatedAt: p.CreatedAt,
 			}
 		}
 
@@ -148,7 +144,6 @@ func (s *Storage) ExtendCarExpiry(id int, flatID int, additionalDays int) error 
 }
 
 func (s *Storage) DeleteCar(id, flatID int) error {
-	s.DB.Where("car_id = ?", id).Delete(&CarPhotoDB{})
 	result := s.DB.Where("id = ? AND flat_id = ?", id, flatID).Delete(&UserCar{})
 	return result.Error
 }
@@ -159,62 +154,83 @@ func (s *Storage) CarBelongsToFlat(carID, flatID int) bool {
 	return count > 0
 }
 
-func (s *Storage) AddCarPhoto(carID int, photoData string, isMain bool) error {
-	photo := &CarPhotoDB{
-		CarID:     carID,
-		PhotoData: photoData,
-		IsMain:    isMain,
-	}
-
-	if isMain {
-		s.DB.Model(&CarPhotoDB{}).Where("car_id = ?", carID).Update("is_main", false)
-	}
-
-	return s.DB.Create(photo).Error
-}
-
-func (s *Storage) GetCarPhotos(carID int) ([]CarPhotoDB, error) {
-	var photos []CarPhotoDB
-	result := s.DB.Where("car_id = ?", carID).Order("is_main DESC").Find(&photos)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	return photos, nil
-}
-
-func (s *Storage) UpdateCarPhoto(photoID, carID int, photoData string, isMain bool) error {
-	if isMain {
-		s.DB.Model(&CarPhotoDB{}).Where("car_id = ?", carID).Update("is_main", false)
-	}
-
-	result := s.DB.Model(&CarPhotoDB{}).
-		Where("id = ? AND car_id = ?", photoID, carID).
-		Updates(map[string]interface{}{
-			"photo_data": photoData,
-			"is_main":    isMain,
-		})
-	return result.Error
-}
-
-func (s *Storage) DeleteCarPhoto(photoID, carID int) error {
-	result := s.DB.Where("id = ? AND car_id = ?", photoID, carID).Delete(&CarPhotoDB{})
-	return result.Error
-}
-
-// Добавьте этот метод в storage/cars.go
+// Проверка существования дубликата номера для квартиры
 func (s *Storage) IsCarExists(flatID int, plateNumber string) (bool, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
 	if result.Error != nil {
-		// Если номер не найден, значит дубликата нет
+		// Если номер не найден, дубликата нет
 		if result.Error == gorm.ErrRecordNotFound {
 			return false, nil
 		}
 		return false, result.Error
 	}
 
-	// Проверяем, есть ли автомобиль с таким plate_id и flat_id
 	var count int64
 	s.DB.Model(&UserCar{}).Where("flat_id = ? AND plate_id = ?", flatID, plate.ID).Count(&count)
 	return count > 0, nil
+}
+
+// Функции для работы с фото (привязка к plate_id)
+func (s *Storage) AddCarPhotoByPlate(plateNumber string, photoData string, isMain bool) error {
+	plateID, err := s.GetOrCreatePlateNumber(plateNumber)
+	if err != nil {
+		return err
+	}
+
+	photo := &CarPhotoDB{
+		PlateID:   plateID,
+		PhotoData: photoData,
+		IsMain:    isMain,
+	}
+
+	if isMain {
+		s.DB.Model(&CarPhotoDB{}).Where("plate_id = ?", plateID).Update("is_main", false)
+	}
+
+	return s.DB.Create(photo).Error
+}
+
+func (s *Storage) GetPhotosByPlateNumber(plateNumber string) ([]CarPhotoDB, error) {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	var photos []CarPhotoDB
+	s.DB.Where("plate_id = ?", plate.ID).Order("is_main DESC").Find(&photos)
+	return photos, nil
+}
+
+func (s *Storage) DeleteCarPhotoByPlate(plateNumber string, photoID int) error {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	result = s.DB.Where("id = ? AND plate_id = ?", photoID, plate.ID).Delete(&CarPhotoDB{})
+	return result.Error
+}
+
+// Обновление фото
+func (s *Storage) UpdateCarPhotoByPlate(plateNumber string, photoID int, photoData string, isMain bool) error {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if isMain {
+		s.DB.Model(&CarPhotoDB{}).Where("plate_id = ?", plate.ID).Update("is_main", false)
+	}
+
+	result = s.DB.Model(&CarPhotoDB{}).
+		Where("id = ? AND plate_id = ?", photoID, plate.ID).
+		Updates(map[string]interface{}{
+			"photo_data": photoData,
+			"is_main":    isMain,
+		})
+	return result.Error
 }

@@ -738,3 +738,27 @@ button:disabled {
         height: 40px;
     }
 }
+
+/* Подсветка поля при ошибке */
+input.error {
+    border-color: #ef4444 !important;
+    animation: shake 0.3s ease-in-out;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+/* Ошибка внутри модального окна */
+.modal-error {
+    background: #fee2e2;
+    color: #dc2626;
+    padding: 12px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    font-size: 14px;
+    border-left: 4px solid #dc2626;
+    animation: slideDown 0.2s ease;
+}

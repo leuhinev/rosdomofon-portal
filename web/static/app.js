@@ -18,7 +18,9 @@ function hideLoading() {
 }
 
 async function loadFlats() {
+    console.log('app.js: loading flats...');
     const data = await api.request('/api/user/flats');
+    console.log('app.js: flats loaded:', data);
     flats = data;
     setCarsFlats(flats);
     setKeysFlats(flats);
@@ -26,6 +28,7 @@ async function loadFlats() {
 }
 
 async function initPortal() {
+    console.log('app.js: initPortal started');
     try {
         const overlay = document.getElementById('loading-overlay');
         if (overlay) {
@@ -33,18 +36,20 @@ async function initPortal() {
             overlay.classList.remove('hide');
         }
 
-        console.log('Initializing portal...');
         await loadFlats();
+        console.log('app.js: calling loadCars');
         await loadCars();
+        console.log('app.js: calling loadKeys');
         await loadKeys();
 
+        console.log('app.js: switching screens');
         document.getElementById('auth-screen').classList.remove('active');
         document.getElementById('portal-screen').classList.add('active');
         showMessage('Добро пожаловать!', false);
-        console.log('Portal initialized successfully');
+        console.log('app.js: initPortal completed');
     } catch (err) {
-        console.error('Init error:', err);
-        showMessage('Ошибка загрузки данных. Попробуйте перезагрузить страницу.');
+        console.error('app.js: initPortal failed:', err);
+        showMessage('Ошибка загрузки данных: ' + err.message, true);
         logout();
     } finally {
         hideLoading();
@@ -52,14 +57,14 @@ async function initPortal() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('DOM loaded, checking token...');
+    console.log('app.js: DOM loaded');
     const isLoggedIn = await refreshTokenIfNeeded();
 
     if (isLoggedIn) {
-        console.log('User is logged in, initializing portal...');
+        console.log('app.js: user logged in, initializing portal');
         await initPortal();
     } else {
-        console.log('User is not logged in, showing auth screen');
+        console.log('app.js: user not logged in');
         hideLoading();
     }
 

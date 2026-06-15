@@ -13,56 +13,23 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-// Глобальная функция валидации номера в реальном времени
-window.validatePlate = function(input) {
-    const value = input.value.toUpperCase();
-    const regex = /^[АВЕКМНОРСТУХA-Z]{0,1}\d{0,3}[АВЕКМНОРСТУХA-Z]{0,2}\d{0,3}$/;
-    const hint = input.parentElement.querySelector('.hint');
-    const errorSpan = input.parentElement.querySelector('.field-error');
-
-    // Удаляем старую ошибку
-    if (errorSpan) errorSpan.remove();
-
-    if (value.length > 0 && !regex.test(value)) {
-        input.style.borderColor = '#ef4444';
-        if (hint) hint.style.color = '#ef4444';
-
-        // Показываем конкретную ошибку
-        const error = document.createElement('div');
-        error.className = 'field-error';
-        error.style.cssText = 'color: #ef4444; font-size: 12px; margin-top: 5px;';
-
-        if (value.length === 1 && !/[АВЕКМНОРСТУХA-Z]/i.test(value)) {
-            error.textContent = '⚠️ Первая буква должна быть из списка: А, В, Е, К, М, Н, О, Р, С, Т, У, Х';
-        } else {
-            error.textContent = '⚠️ Неверный формат. Пример: A123BC159';
-        }
-
-        input.parentElement.appendChild(error);
-    } else {
-        input.style.borderColor = '#e0e0e0';
-        if (hint) hint.style.color = '#7f8c8d';
-    }
-
-    // Обновляем подсказку
-    if (hint) {
-        if (value.length === 1 && !/[АВЕКМНОРСТУХA-Z]/i.test(value)) {
-            hint.textContent = 'Первая буква должна быть из списка: А,В,Е,К,М,Н,О,Р,С,Т,У,Х';
-        } else {
-            hint.textContent = 'Формат: буква, 3 цифры, 2 буквы, 2-3 цифры региона';
-        }
-    }
-};
-
 function setFlats(flatsData) {
+    console.log('cars.js: setFlats received', flatsData?.length, 'flats');
     flats = flatsData;
 }
 
 async function loadCars() {
+    console.log('cars.js: loadCars started, flats length:', flats.length);
     try {
         const cars = await api.request('/api/cars');
+        console.log('cars.js: received', cars.length, 'cars');
         cachedCars = cars;
         const container = document.getElementById('cars-list');
+
+        if (!container) {
+            console.error('cars.js: cars-list element not found');
+            return;
+        }
 
         if (cars.length === 0) {
             container.innerHTML = '<p class="empty-message">📭 Нет добавленных автомобилей</p>';
@@ -74,7 +41,8 @@ async function loadCars() {
             const showExtend = daysUntilExpiry <= 7 && daysUntilExpiry > 0;
             const mainPhoto = car.Photos?.find(p => p.IsMain) || car.Photos?.[0];
             const photoSrc = mainPhoto ? mainPhoto.PhotoData : '';
-            const flatAddress = flats.find(f => f.flat_id === car.FlatID)?.address || 'Адрес не найден';
+            const flatInfo = flats.find(f => f.flat_id === car.FlatID);
+            const flatAddress = flatInfo ? flatInfo.address : 'Адрес не найден (ID: ' + car.FlatID + ')';
 
             return `
             <div class="car-item" data-id="${car.ID}">
@@ -105,10 +73,14 @@ async function loadCars() {
                 </div>
             </div>
         `}).join('');
+        console.log('cars.js: rendering complete');
     } catch (err) {
-        console.error('Error loading cars:', err);
-        showMessage('❌ ' + err.message);
-        document.getElementById('cars-list').innerHTML = '<p class="error-message">❌ Ошибка загрузки автомобилей</p>';
+        console.error('cars.js: loadCars error:', err);
+        const container = document.getElementById('cars-list');
+        if (container) {
+            container.innerHTML = '<p class="error-message">❌ Ошибка загрузки автомобилей: ' + err.message + '</p>';
+        }
+        throw err;
     }
 }
 
@@ -150,12 +122,12 @@ async function extendCar(id) {
 
     if (days) {
         try {
-            const result = await api.request(`/api/cars/extend/${id}`, {
+            await api.request(`/api/cars/extend/${id}`, {
                 method: 'POST',
                 body: JSON.stringify({ additional_days: days })
             });
-            showMessage('✅ ' + (result.message || 'Срок действия продлён'), false);
             await loadCars();
+            showMessage('✅ Срок действия продлён', false);
         } catch (err) {
             showMessage('❌ ' + err.message);
         }
@@ -183,7 +155,7 @@ async function addCar(flatsList) {
             </div>
             <div class="form-group">
                 <label for="plate_number">Номер автомобиля:</label>
-                <input type="text" id="plate_number" placeholder="Например: A123BC159 или О743УХ159" required oninput="validatePlate(this)">
+                <input type="text" id="plate_number" placeholder="Например: A123BC159 или О743УХ159" required>
                 <small class="hint">Формат: буква, 3 цифры, 2 буквы, 2-3 цифры региона</small>
             </div>
             <div class="form-group">
@@ -227,31 +199,33 @@ async function addCar(flatsList) {
                     <option value="year">1 год</option>
                 </select>
             </div>
+            <div id="form-error" style="color:#dc2626; font-size:14px; margin-bottom:15px; padding:10px; background:#fee2e2; border-radius:8px; display:none;"></div>
             <button type="submit" class="primary-btn">➕ Добавить</button>
         </form>
     `;
     document.getElementById('modal').style.display = 'block';
 
-    document.getElementById('add-car-form').onsubmit = async (e) => {
+    const form = document.getElementById('add-car-form');
+    const errorDiv = document.getElementById('form-error');
+
+    form.onsubmit = async (e) => {
         e.preventDefault();
+
+        // Скрываем предыдущую ошибку
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
 
         const flatId = parseInt(document.getElementById('flat_id').value);
         if (!flatId) {
-            showMessage('❌ Выберите квартиру');
+            errorDiv.textContent = '❌ Выберите квартиру';
+            errorDiv.style.display = 'block';
             return;
         }
 
         const plateNumber = document.getElementById('plate_number').value.trim();
         if (!plateNumber) {
-            showMessage('❌ Введите номер автомобиля');
-            return;
-        }
-
-        // Проверка формата перед отправкой
-        const normalizedPlate = plateNumber.toUpperCase();
-        const plateRegex = /^[A-ZА-Я]\d{3}[A-ZА-Я]{2}\d{2,3}$/;
-        if (!plateRegex.test(normalizedPlate)) {
-            showMessage('❌ Неверный формат номера. Используйте формат: A123BC159');
+            errorDiv.textContent = '❌ Введите номер автомобиля';
+            errorDiv.style.display = 'block';
             return;
         }
 
@@ -266,14 +240,28 @@ async function addCar(flatsList) {
             expires_in_days: document.getElementById('expiry').value
         };
 
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '⏳ Добавление...';
+        submitBtn.disabled = true;
+
         try {
             const result = await api.request('/api/cars', { method: 'POST', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Автомобиль добавлен'), false);
             await loadCars();
         } catch (err) {
-            console.error('Add car error:', err);
-            showMessage('❌ ' + err.message);
+            errorDiv.textContent = '❌ ' + err.message;
+            errorDiv.style.display = 'block';
+            // Подсвечиваем поле с номером
+            const plateInput = document.getElementById('plate_number');
+            plateInput.style.borderColor = '#ef4444';
+            setTimeout(() => {
+                plateInput.style.borderColor = '#e0e0e0';
+            }, 3000);
+        } finally {
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
         }
     };
 
@@ -289,10 +277,7 @@ async function editCar(id) {
         showMessage('❌ Автомобиль не найден');
         return;
     }
-    showEditModal(car);
-}
 
-function showEditModal(car) {
     const modalBody = document.getElementById('modal-body');
     modalBody.innerHTML = `
         <h3>✏️ Редактировать автомобиль</h3>
@@ -347,9 +332,9 @@ function showEditModal(car) {
             notify_on_exit: document.getElementById('notify_exit').checked
         };
         try {
-            const result = await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
+            await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
-            showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
+            showMessage('✅ Изменения сохранены', false);
             await loadCars();
         } catch (err) {
             showMessage('❌ ' + err.message);
@@ -364,8 +349,8 @@ function showEditModal(car) {
 
 async function deleteCar(id) {
     try {
-        const result = await api.request(`/api/cars/${id}`, { method: 'DELETE' });
-        showMessage('✅ ' + (result.message || 'Автомобиль удалён'), false);
+        await api.request(`/api/cars/${id}`, { method: 'DELETE' });
+        showMessage('✅ Автомобиль удалён', false);
         await loadCars();
     } catch (err) {
         showMessage('❌ ' + err.message);

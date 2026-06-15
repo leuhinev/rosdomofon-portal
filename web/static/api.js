@@ -13,28 +13,28 @@ const api = {
 
         const response = await fetch(endpoint, { ...options, headers });
 
+        // Обработка 401 - не авторизован
         if (response.status === 401) {
             logout();
             throw new Error('Сессия истекла. Пожалуйста, авторизуйтесь заново.');
         }
 
-        // Пробуем получить JSON ответ
+        // Парсим JSON ответ
         let data;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
+        try {
             data = await response.json();
-        } else {
-            // Если ответ не JSON, читаем как текст
-            const text = await response.text();
-            throw new Error(`Ошибка сервера: ${response.status}`);
+        } catch (e) {
+            // Если ответ не JSON (например, HTML ошибка)
+            throw new Error(`Ошибка сервера: ${response.status} ${response.statusText}`);
         }
 
+        // Если статус не 2xx - ошибка
         if (!response.ok) {
-            // Извлекаем сообщение об ошибке из ответа сервера
             const errorMessage = data.error || data.message || 'Произошла ошибка';
             throw new Error(errorMessage);
         }
 
+        // Успешный ответ
         return data;
     }
 };

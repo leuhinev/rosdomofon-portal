@@ -44,7 +44,7 @@ func (UserCar) TableName() string {
 // Таблица для фотографий автомобилей
 type CarPhotoDB struct {
 	ID        int    `gorm:"primaryKey;autoIncrement"`
-	CarID     int    `gorm:"not null;index"`
+	PlateID   int    `gorm:"not null;index"` // Ссылка на plate_numbers.id
 	PhotoData string `gorm:"type:longtext;not null"`
 	IsMain    bool   `gorm:"default:false"`
 	CreatedAt int64  `gorm:"autoCreateTime"`
