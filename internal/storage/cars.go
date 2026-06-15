@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"gorm.io/gorm"
 	"log/slog"
 	"time"
 )
@@ -198,4 +199,22 @@ func (s *Storage) UpdateCarPhoto(photoID, carID int, photoData string, isMain bo
 func (s *Storage) DeleteCarPhoto(photoID, carID int) error {
 	result := s.DB.Where("id = ? AND car_id = ?", photoID, carID).Delete(&CarPhotoDB{})
 	return result.Error
+}
+
+// Добавьте этот метод в storage/cars.go
+func (s *Storage) IsCarExists(flatID int, plateNumber string) (bool, error) {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		// Если номер не найден, значит дубликата нет
+		if result.Error == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, result.Error
+	}
+
+	// Проверяем, есть ли автомобиль с таким plate_id и flat_id
+	var count int64
+	s.DB.Model(&UserCar{}).Where("flat_id = ? AND plate_id = ?", flatID, plate.ID).Count(&count)
+	return count > 0, nil
 }

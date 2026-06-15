@@ -15,12 +15,26 @@ const api = {
 
         if (response.status === 401) {
             logout();
-            throw new Error('unauthorized');
+            throw new Error('Сессия истекла. Пожалуйста, авторизуйтесь заново.');
         }
-        const data = await response.json();
+
+        // Пробуем получить JSON ответ
+        let data;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            // Если ответ не JSON, читаем как текст
+            const text = await response.text();
+            throw new Error(`Ошибка сервера: ${response.status}`);
+        }
+
         if (!response.ok) {
-            throw new Error(data.error || 'request failed');
+            // Извлекаем сообщение об ошибке из ответа сервера
+            const errorMessage = data.error || data.message || 'Произошла ошибка';
+            throw new Error(errorMessage);
         }
+
         return data;
     }
 };

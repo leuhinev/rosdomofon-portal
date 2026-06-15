@@ -10,6 +10,7 @@ type MemoryDB struct {
 	phoneToOwner  map[string]rosdomofon.OwnerInfo
 	flatToAddress map[int]string
 	ownerToFlats  map[int][]int
+	ownerToPhone  map[int]string // Обратный индекс: owner_id -> phone
 }
 
 func New() *MemoryDB {
@@ -17,6 +18,7 @@ func New() *MemoryDB {
 		phoneToOwner:  make(map[string]rosdomofon.OwnerInfo),
 		flatToAddress: make(map[int]string),
 		ownerToFlats:  make(map[int][]int),
+		ownerToPhone:  make(map[int]string),
 	}
 }
 
@@ -26,6 +28,12 @@ func (db *MemoryDB) Update(data map[string]rosdomofon.OwnerInfo, flats map[int]s
 	db.phoneToOwner = data
 	db.flatToAddress = flats
 	db.ownerToFlats = ownerFlats
+
+	// Строим обратный индекс owner_id -> phone
+	db.ownerToPhone = make(map[int]string)
+	for phone, info := range data {
+		db.ownerToPhone[info.OwnerID] = phone
+	}
 }
 
 func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
@@ -36,6 +44,13 @@ func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
 		return 0, nil, false
 	}
 	return info.OwnerID, info.FlatIDs, true
+}
+
+func (db *MemoryDB) GetPhoneByOwnerID(ownerID int) (string, bool) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	phone, ok := db.ownerToPhone[ownerID]
+	return phone, ok
 }
 
 func (db *MemoryDB) GetFlatsByOwner(ownerID int) []int {

@@ -42,13 +42,48 @@ func normalizePlateNumber(plate string) string {
 	return strings.ToUpper(result)
 }
 
+// Валидация формата номера с понятным сообщением
+func validatePlateFormat(plate string) (bool, string) {
+	// Нормализуем номер
+	normalized := normalizePlateNumber(plate)
+
+	// Регулярное выражение для российских номеров
+	plateRegex := regexp.MustCompile(`^[A-Z]\d{3}[A-Z]{2}\d{2,3}$`)
+
+	if !plateRegex.MatchString(normalized) {
+		// Определяем конкретную причину
+		if len(normalized) < 6 {
+			return false, "Номер слишком короткий. Пример: A123BC159"
+		}
+		if len(normalized) > 9 {
+			return false, "Номер слишком длинный. Пример: A123BC159"
+		}
+
+		// Проверяем наличие цифр
+		hasDigits := regexp.MustCompile(`\d`).MatchString(normalized)
+		if !hasDigits {
+			return false, "Номер должен содержать цифры. Пример: A123BC159"
+		}
+
+		// Проверяем наличие букв
+		hasLetters := regexp.MustCompile(`[A-Z]`).MatchString(normalized)
+		if !hasLetters {
+			return false, "Номер должен содержать буквы. Пример: A123BC159"
+		}
+
+		return false, "Неверный формат номера. Используйте формат: Буква, 3 цифры, 2 буквы, 2-3 цифры (например: A123BC159)"
+	}
+
+	return true, ""
+}
+
 func (h *CarsHandler) GetCars(w http.ResponseWriter, r *http.Request) {
 	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
 
 	cars, err := h.storage.GetCarsByFlatIDs(allowedFlats)
 	if err != nil {
 		slog.Error("failed to get cars", "error", err)
-		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Ошибка загрузки списка автомобилей"}`, http.StatusInternalServerError)
 		return
 	}
 
@@ -73,38 +108,55 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		slog.Error("failed to decode request", "error", err)
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный формат запроса"}`, http.StatusBadRequest)
 		return
 	}
 
+	// Валидация flat_id
+	if req.FlatID == 0 {
+		http.Error(w, `{"error":"Не выбран адрес квартиры"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Проверяем, что flat_id существует в памяти
+	address := h.memoryDB.GetAddress(req.FlatID)
+	if address == "" {
+		slog.Error("flat_id not found", "flat_id", req.FlatID)
+		http.Error(w, `{"error":"Выбранный адрес не найден в системе"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Валидация номера автомобиля
 	originalPlate := req.PlateNumber
-	normalizedPlate := normalizePlateNumber(req.PlateNumber)
+	if originalPlate == "" {
+		http.Error(w, `{"error":"Введите номер автомобиля"}`, http.StatusBadRequest)
+		return
+	}
+
+	isValid, errorMsg := validatePlateFormat(originalPlate)
+	if !isValid {
+		slog.Error("invalid plate format", "plate", originalPlate, "error", errorMsg)
+		http.Error(w, `{"error":"`+errorMsg+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	normalizedPlate := normalizePlateNumber(originalPlate)
 
 	slog.Info("create car request",
 		"flat_id", req.FlatID,
 		"original_plate", originalPlate,
-		"normalized_plate", normalizedPlate)
+		"normalized_plate", normalizedPlate,
+		"address", address)
 
-	plateRegex := regexp.MustCompile(`^[A-Z]\d{3}[A-Z]{2}\d{2,3}$`)
-	if !plateRegex.MatchString(normalizedPlate) {
-		slog.Error("invalid plate format", "plate", normalizedPlate)
-		http.Error(w, `{"error":"invalid plate format"}`, http.StatusBadRequest)
-		return
-	}
-
-	if req.FlatID == 0 {
-		slog.Error("flat_id is required")
-		http.Error(w, `{"error":"flat_id is required"}`, http.StatusBadRequest)
-		return
-	}
-
+	// Проверка срока действия
 	validDays := map[string]bool{"day": true, "week": true, "month": true, "3months": true, "6months": true, "year": true}
 	if !validDays[req.ExpiresInDays] {
 		slog.Error("invalid expires_in_days", "value", req.ExpiresInDays)
-		http.Error(w, `{"error":"invalid expires_in_days"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверно указан срок действия"}`, http.StatusBadRequest)
 		return
 	}
 
+	// Проверка прав доступа к квартире
 	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
 	flatAllowed := false
 	for _, fid := range allowedFlats {
@@ -116,7 +168,21 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 
 	if !flatAllowed {
 		slog.Error("flat not accessible", "flat_id", req.FlatID)
-		http.Error(w, `{"error":"flat not accessible"}`, http.StatusForbidden)
+		http.Error(w, `{"error":"У вас нет доступа к этой квартире"}`, http.StatusForbidden)
+		return
+	}
+
+	// Проверка на дубликат номера для этой квартиры
+	exists, err := h.storage.IsCarExists(req.FlatID, normalizedPlate)
+	if err != nil {
+		slog.Error("failed to check duplicate", "error", err)
+		http.Error(w, `{"error":"Ошибка проверки дубликатов"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if exists {
+		slog.Warn("duplicate car", "flat_id", req.FlatID, "plate", normalizedPlate)
+		http.Error(w, `{"error":"Автомобиль с таким номером уже добавлен для этой квартиры"}`, http.StatusConflict)
 		return
 	}
 
@@ -136,19 +202,24 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.storage.CreateCar(car); err != nil {
 		slog.Error("failed to create car", "error", err)
-		http.Error(w, `{"error":"failed to create car"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Не удалось добавить автомобиль. Попробуйте позже."}`, http.StatusInternalServerError)
 		return
 	}
 
 	slog.Info("car created successfully", "car_id", car.ID, "plate", car.PlateNumber)
-	json.NewEncoder(w).Encode(car)
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Автомобиль успешно добавлен",
+		"car":     car,
+	})
 }
 
 func (h *CarsHandler) UpdateCar(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/api/cars/"):]
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный идентификатор автомобиля"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -160,7 +231,7 @@ func (h *CarsHandler) UpdateCar(w http.ResponseWriter, r *http.Request) {
 		NotifyOnExit   bool   `json:"notify_on_exit"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный формат запроса"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -168,33 +239,38 @@ func (h *CarsHandler) UpdateCar(w http.ResponseWriter, r *http.Request) {
 
 	cars, _ := h.storage.GetCarsByFlatIDs(allowedFlats)
 	var flatID int
+	var carExists bool
 	for _, car := range cars {
 		if car.ID == id {
 			flatID = car.FlatID
+			carExists = true
 			break
 		}
 	}
 
-	if flatID == 0 {
-		http.Error(w, `{"error":"car not found"}`, http.StatusNotFound)
+	if !carExists {
+		http.Error(w, `{"error":"Автомобиль не найден"}`, http.StatusNotFound)
 		return
 	}
 
 	if err := h.storage.UpdateCar(id, flatID, req.Comment, req.AutoOpen, req.NotifyOnDetect, req.NotifyOnEntry, req.NotifyOnExit); err != nil {
 		slog.Error("failed to update car", "error", err)
-		http.Error(w, `{"error":"failed to update"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Не удалось сохранить изменения"}`, http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "updated"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Изменения сохранены",
+	})
 }
 
 func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/api/cars/extend/"):]
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный идентификатор автомобиля"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -202,7 +278,12 @@ func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
 		AdditionalDays int `json:"additional_days"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный формат запроса"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.AdditionalDays <= 0 {
+		http.Error(w, `{"error":"Укажите корректный срок продления"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -220,31 +301,34 @@ func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if flatID == 0 {
-		http.Error(w, `{"error":"car not found"}`, http.StatusNotFound)
+		http.Error(w, `{"error":"Автомобиль не найден"}`, http.StatusNotFound)
 		return
 	}
 
 	daysUntilExpiry := int(time.Until(carFound.ExpiresAt).Hours() / 24)
 	if daysUntilExpiry > 7 {
-		http.Error(w, `{"error":"can only extend within 7 days of expiry"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Продлить срок можно только за 7 дней до истечения. До истечения осталось `+strconv.Itoa(daysUntilExpiry)+` дней"}`, http.StatusBadRequest)
 		return
 	}
 
 	if err := h.storage.ExtendCarExpiry(id, flatID, req.AdditionalDays); err != nil {
 		slog.Error("failed to extend car", "error", err)
-		http.Error(w, `{"error":"failed to extend"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Не удалось продлить срок действия"}`, http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "extended"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Срок действия успешно продлён",
+	})
 }
 
 func (h *CarsHandler) DeleteCar(w http.ResponseWriter, r *http.Request) {
 	idStr := r.URL.Path[len("/api/cars/"):]
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
-		http.Error(w, `{"error":"invalid id"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Неверный идентификатор автомобиля"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -252,24 +336,29 @@ func (h *CarsHandler) DeleteCar(w http.ResponseWriter, r *http.Request) {
 
 	cars, _ := h.storage.GetCarsByFlatIDs(allowedFlats)
 	var flatID int
+	var carExists bool
 	for _, car := range cars {
 		if car.ID == id {
 			flatID = car.FlatID
+			carExists = true
 			break
 		}
 	}
 
-	if flatID == 0 {
-		http.Error(w, `{"error":"car not found"}`, http.StatusNotFound)
+	if !carExists {
+		http.Error(w, `{"error":"Автомобиль не найден"}`, http.StatusNotFound)
 		return
 	}
 
 	if err := h.storage.DeleteCar(id, flatID); err != nil {
 		slog.Error("failed to delete car", "error", err)
-		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
+		http.Error(w, `{"error":"Не удалось удалить автомобиль"}`, http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Автомобиль удалён",
+	})
 }

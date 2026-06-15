@@ -20,11 +20,10 @@ function hideLoading() {
 async function loadFlats() {
     const data = await api.request('/api/user/flats');
     flats = data;
-    setCarsFlats(flats); // Передаём flats в cars.js
-    setKeysFlats(flats); // Передаём flats в keys.js
+    setCarsFlats(flats);
+    setKeysFlats(flats);
     return flats;
 }
-
 
 async function initPortal() {
     try {
@@ -34,6 +33,7 @@ async function initPortal() {
             overlay.classList.remove('hide');
         }
 
+        console.log('Initializing portal...');
         await loadFlats();
         await loadCars();
         await loadKeys();
@@ -41,6 +41,7 @@ async function initPortal() {
         document.getElementById('auth-screen').classList.remove('active');
         document.getElementById('portal-screen').classList.add('active');
         showMessage('Добро пожаловать!', false);
+        console.log('Portal initialized successfully');
     } catch (err) {
         console.error('Init error:', err);
         showMessage('Ошибка загрузки данных. Попробуйте перезагрузить страницу.');
@@ -51,10 +52,14 @@ async function initPortal() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    console.log('DOM loaded, checking token...');
     const isLoggedIn = await refreshTokenIfNeeded();
+
     if (isLoggedIn) {
+        console.log('User is logged in, initializing portal...');
         await initPortal();
     } else {
+        console.log('User is not logged in, showing auth screen');
         hideLoading();
     }
 

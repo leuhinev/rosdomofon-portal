@@ -9,6 +9,7 @@ import (
 	"rosdomofon-portal/internal/memorydb"
 	"rosdomofon-portal/internal/rosdomofon"
 	"strconv"
+	"time"
 )
 
 type AuthHandler struct {
@@ -148,7 +149,7 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"access_token": token})
 }
 
-// Новый метод для refresh token
+// RefreshToken - обновление токена с проверкой прав в РосДомофоне
 func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
@@ -164,13 +165,52 @@ func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newToken, err := h.jwtManager.Refresh(req.Token)
+	// Проверяем старый токен
+	claims, err := h.jwtManager.Verify(req.Token)
 	if err != nil {
-		slog.Error("failed to refresh token", "error", err)
-		http.Error(w, `{"error":"refresh failed"}`, http.StatusUnauthorized)
+		slog.Error("failed to verify token", "error", err)
+		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 		return
 	}
 
-	slog.Info("token refreshed successfully")
+	// Проверяем, что токен не истек
+	if claims.ExpiresAt.Time.Before(time.Now()) {
+		slog.Error("token expired")
+		http.Error(w, `{"error":"token expired"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Нужно найти телефон по owner_id для проверки в РосДомофоне
+	// Для этого нужно добавить обратный индекс в memorydb
+	phone, ok := h.memoryDB.GetPhoneByOwnerID(claims.OwnerID)
+	if !ok {
+		slog.Error("owner not found in Rosdomofon", "owner_id", claims.OwnerID)
+		http.Error(w, `{"error":"user not found in Rosdomofon"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Проверяем, что пользователь всё ещё существует в РосДомофоне
+	// и получаем актуальный список flat_ids
+	ownerID, flatIDs, ok := h.memoryDB.GetOwnerByPhone(phone)
+	if !ok {
+		slog.Error("user no longer exists in Rosdomofon", "phone", phone)
+		http.Error(w, `{"error":"access revoked"}`, http.StatusUnauthorized)
+		return
+	}
+
+	// Проверяем, что owner_id не изменился
+	if ownerID != claims.OwnerID {
+		slog.Warn("owner_id mismatch", "old", claims.OwnerID, "new", ownerID)
+	}
+
+	// Генерируем новый токен с актуальными flat_ids
+	newToken, err := h.jwtManager.Generate(ownerID, flatIDs)
+	if err != nil {
+		slog.Error("failed to generate new token", "error", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("token refreshed successfully", "owner_id", ownerID, "flats_count", len(flatIDs))
 	json.NewEncoder(w).Encode(map[string]string{"access_token": newToken})
 }

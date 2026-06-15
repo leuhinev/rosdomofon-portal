@@ -47,18 +47,18 @@ func (m *JWTManager) Verify(tokenStr string) (*Claims, error) {
 	return claims, nil
 }
 
-// Новый метод для refresh token
+// Refresh - обновление токена (всегда можно обновить)
 func (m *JWTManager) Refresh(tokenStr string) (string, error) {
 	claims, err := m.Verify(tokenStr)
 	if err != nil {
 		return "", err
 	}
 
-	// Проверяем, что токен еще не истек (можно обновить за 7 дней до истечения)
-	if time.Until(claims.ExpiresAt.Time) > 7*24*time.Hour {
-		return "", errors.New("token too early to refresh")
+	// Проверяем, что токен не истек
+	if claims.ExpiresAt.Time.Before(time.Now()) {
+		return "", errors.New("token expired")
 	}
 
-	// Генерируем новый токен
+	// Генерируем новый токен с новым сроком действия
 	return m.Generate(claims.OwnerID, claims.FlatIDs)
 }
