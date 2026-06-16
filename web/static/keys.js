@@ -31,7 +31,10 @@ async function loadKeys() {
             container.innerHTML = '<p class="empty-message">🔐 Нет добавленных ключей</p>';
             return;
         }
-        container.innerHTML = keys.map(key => `
+        container.innerHTML = keys.map(key => {
+            // Используем key.address (с маленькой буквы, как приходит с сервера)
+            const address = key.address || 'Адрес не найден';
+            return `
             <div class="key-item" data-id="${key.ID}">
                 <div class="key-header">
                     <span class="key-data">🔑 ${maskKey(key.KeyData)}</span>
@@ -41,9 +44,9 @@ async function loadKeys() {
                     </div>
                 </div>
                 ${key.Comment ? `<div class="comment">💬 ${escapeHtml(key.Comment)}</div>` : ''}
-                <div class="address">📍 ${escapeHtml(key.Address || 'Адрес не найден')}</div>
+                <div class="address">📍 ${escapeHtml(address)}</div>
             </div>
-        `).join('');
+        `}).join('');
     } catch (err) {
         console.error('Error loading keys:', err);
         document.getElementById('keys-list').innerHTML = '<p class="error-message">❌ Ошибка загрузки ключей</p>';

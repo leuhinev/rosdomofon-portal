@@ -33,9 +33,9 @@ async function loadCars() {
             const showExtend = daysUntilExpiry <= 7 && daysUntilExpiry > 0;
             const mainPhoto = car.Photos?.find(p => p.IsMain) || car.Photos?.[0];
             const photoSrc = mainPhoto ? mainPhoto.PhotoData : '';
-            const address = car.Address || 'Адрес не найден';
+            // Используем car.address (с маленькой буквы, как приходит с сервера)
+            const address = car.address || 'Адрес не найден';
 
-            // Форматируем дату и время
             const expiryDateStr = expiryDate.toLocaleDateString('ru-RU');
             const expiryTimeStr = expiryDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -168,6 +169,7 @@ func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("WebViewAuth called", "action_token_preview", req.ActionToken[:8]+"...")
 
+	// 1. Проверяем токен в API РосДомофона
 	tokenInfo, err := h.rosClient.VerifyActionToken(req.ActionToken)
 	if err != nil {
 		slog.Error("failed to verify action token", "error", err)
@@ -175,25 +177,80 @@ func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("action token verified", "subscriber_id", tokenInfo.SubscriberId)
+	subscriberId := tokenInfo.SubscriberId
+	slog.Info("action token verified", "subscriber_id", subscriberId)
 
-	phone, addressIDs, ok := h.memoryDB.GetOwnerBySubscriberID(tokenInfo.SubscriberId)
+	// 2. Получаем квартиры абонента из РосДомофона
+	abonentFlats, err := h.rosClient.GetAbonentFlats(subscriberId)
+	if err != nil {
+		slog.Error("failed to get abonent flats", "error", err)
+		http.Error(w, `{"error":"failed to get abonent flats"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if len(abonentFlats) == 0 {
+		slog.Warn("no flats found for subscriber", "subscriber_id", subscriberId)
+		http.Error(w, `{"error":"no flats found for this subscriber"}`, http.StatusNotFound)
+		return
+	}
+
+	slog.Info("abonent flats received", "count", len(abonentFlats))
+
+	// 3. Сопоставляем полученные адреса с существующими в нашей БД
+	var existingAddressIDs []int
+
+	for _, flat := range abonentFlats {
+		addrComp := rosdomofon.AddressComponents{
+			StreetID:   flat.Address.Street.ID,
+			HouseID:    flat.Address.House.ID,
+			EntranceID: flat.Address.Entrance.ID,
+			FlatNumber: flat.Address.Flat,
+			AddressStr: fmt.Sprintf("%s, %s, д.%s, кв.%d",
+				flat.Address.City,
+				flat.Address.Street.Name,
+				flat.Address.House.Number,
+				flat.Address.Flat),
+		}
+
+		// Ищем address_id по компонентам в памяти
+		addressID, ok := h.memoryDB.GetAddressIDByComponents(addrComp)
+		if ok {
+			existingAddressIDs = append(existingAddressIDs, addressID)
+			slog.Debug("found existing address", "address_id", addressID, "address", addrComp.AddressStr)
+		} else {
+			slog.Debug("address not found in DB, skipping", "address", addrComp.AddressStr)
+		}
+	}
+
+	if len(existingAddressIDs) == 0 {
+		slog.Warn("no matching addresses found in DB", "subscriber_id", subscriberId)
+		http.Error(w, `{"error":"no matching addresses found"}`, http.StatusNotFound)
+		return
+	}
+
+	// 4. Находим телефон по subscriber_id
+	phone, _, ok := h.memoryDB.GetOwnerBySubscriberID(subscriberId)
 	if !ok {
-		slog.Error("subscriber not found", "subscriber_id", tokenInfo.SubscriberId)
-		http.Error(w, `{"error":"subscriber not found in system"}`, http.StatusNotFound)
+		slog.Error("subscriber not found in memory", "subscriber_id", subscriberId)
+		http.Error(w, `{"error":"subscriber not found"}`, http.StatusNotFound)
 		return
 	}
 
 	ownerID, _, _ := h.memoryDB.GetOwnerByPhone(phone)
-	slog.Info("subscriber data", "phone", phone, "owner_id", ownerID, "address_ids", addressIDs)
+	slog.Info("subscriber data", "phone", phone, "owner_id", ownerID, "address_ids", existingAddressIDs)
 
-	jwtToken, err := h.jwtManager.Generate(ownerID, addressIDs)
+	// 5. Генерируем JWT только с существующими address_id
+	jwtToken, err := h.jwtManager.Generate(ownerID, existingAddressIDs)
 	if err != nil {
 		slog.Error("failed to generate token", "error", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	slog.Info("webview auth successful", "subscriber_id", tokenInfo.SubscriberId, "phone", phone)
+	slog.Info("webview auth successful",
+		"subscriber_id", subscriberId,
+		"phone", phone,
+		"addresses_count", len(existingAddressIDs))
+
 	json.NewEncoder(w).Encode(map[string]string{"access_token": jwtToken})
 }

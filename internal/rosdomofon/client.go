@@ -145,6 +145,54 @@ func (c *Client) VerifyActionToken(actionToken string) (*ActionTokenInfo, error)
 	return &info, nil
 }
 
+// GetAbonentFlats - получение всех квартир абонента
+func (c *Client) GetAbonentFlats(subscriberId int) ([]AbonentFlat, error) {
+	slog.Info("getting abonent flats", "subscriber_id", subscriberId)
+
+	token, err := c.GetToken()
+	if err != nil {
+		slog.Error("failed to get token", "error", err)
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://rdba.rosdomofon.com/abonents-service/api/v1/abonents/%d/flats", subscriberId)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		slog.Error("failed to create abonent flats request", "error", err)
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("failed to send abonent flats request", "error", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read abonent flats response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("abonent flats response", "status", resp.StatusCode, "body_length", len(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("abonent flats request failed", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("abonent flats request failed: %d", resp.StatusCode)
+	}
+
+	var flats []AbonentFlat
+	if err := json.Unmarshal(body, &flats); err != nil {
+		slog.Error("failed to parse abonent flats response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("abonent flats loaded", "count", len(flats))
+	return flats, nil
+}
+
 // GetConnections - получает все связи для конкретного сервиса
 func (c *Client) GetConnections(serviceID int) ([]Connection, error) {
 	slog.Info("getting connections for service", "service_id", serviceID)

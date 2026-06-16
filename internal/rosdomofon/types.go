@@ -39,9 +39,9 @@ type Street struct {
 
 type Flat struct {
 	ID      int     `json:"id"`
+	Owner   Owner   `json:"owner"`
 	Address Address `json:"address"`
 	Virtual bool    `json:"virtual"`
-	// Owner убран отсюда, он теперь в Account
 }
 
 type Owner struct {
@@ -139,4 +139,28 @@ type EntranceItem struct {
 type ServiceInfo struct {
 	ID   int
 	Type string
+}
+
+// AddressComponents - стабильные компоненты адреса
+type AddressComponents struct {
+	StreetID   int
+	HouseID    int
+	EntranceID int
+	FlatNumber int
+	AddressStr string
+}
+
+// AbonentFlat - квартира абонента из /abonents/{subscriberId}/flats
+type AbonentFlat struct {
+	Address            Address `json:"address"`
+	ID                 int     `json:"id"`
+	AccountId          int     `json:"accountId"`
+	CameraId           int     `json:"cameraId,omitempty"`
+	RdaUid             string  `json:"rdaUid,omitempty"`
+	SoftwareIntercomId int     `json:"softwareIntercomId,omitempty"`
+	HardwareIntercomId int     `json:"hardwareIntercomId,omitempty"`
+	Owner              struct {
+		ID int `json:"id"`
+	} `json:"owner"`
+	Virtual bool `json:"virtual"`
 }

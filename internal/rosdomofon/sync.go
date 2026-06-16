@@ -6,23 +6,15 @@ import (
 	"log/slog"
 )
 
-type AddressComponents struct {
-	StreetID   int
-	HouseID    int
-	EntranceID int
-	FlatNumber int
-	AddressStr string
+type OwnerInfo struct {
+	OwnerID    int
+	AddressIDs []int
 }
 
 type SyncedData struct {
 	PhoneToOwner     map[string]OwnerInfo
-	AddressToID      map[AddressComponents]int // map[компоненты адреса] -> address_id
-	OwnerToAddresses map[int][]int             // owner_id -> []address_id
-}
-
-type OwnerInfo struct {
-	OwnerID    int
-	AddressIDs []int // теперь храним address_id вместо flat_id
+	AddressToID      map[AddressComponents]int
+	OwnerToAddresses map[int][]int
 }
 
 func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
@@ -51,7 +43,6 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 		OwnerToAddresses: make(map[int][]int),
 	}
 
-	// Временный кеш для address_id, чтобы не создавать дубли
 	addressCache := make(map[AddressComponents]int)
 
 	for _, serviceID := range serviceIDs {
@@ -83,7 +74,6 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 				flat.Address.House.Number,
 				flat.Address.Flat)
 
-			// Создаём компоненты адреса
 			addrComp := AddressComponents{
 				StreetID:   flat.Address.Street.ID,
 				HouseID:    flat.Address.House.ID,
@@ -92,25 +82,18 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 				AddressStr: addressStr,
 			}
 
-			// Получаем или создаём address_id
 			addressID, ok := addressCache[addrComp]
 			if !ok {
-				// В реальном коде здесь нужно создавать запись в БД через storage
-				// Но в sync мы только собираем данные, БД обновляется отдельно
-				// Поэтому просто генерируем временный ID для этого цикла
 				addressID = len(addressCache) + 1
 				addressCache[addrComp] = addressID
 				data.AddressToID[addrComp] = addressID
 			}
 
-			// Используем владельца из account
 			phone := fmt.Sprintf("+%d", conn.Account.Owner.Phone)
 			ownerID := conn.Account.Owner.ID
 
-			// Обновляем данные по владельцу
 			info := data.PhoneToOwner[phone]
 			info.OwnerID = ownerID
-			// Добавляем address_id, если его ещё нет
 			found := false
 			for _, aid := range info.AddressIDs {
 				if aid == addressID {
@@ -123,7 +106,6 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 			}
 			data.PhoneToOwner[phone] = info
 
-			// Добавляем в ownerToAddresses
 			addresses := data.OwnerToAddresses[ownerID]
 			foundAddr := false
 			for _, aid := range addresses {
