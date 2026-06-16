@@ -39,9 +39,9 @@ type Street struct {
 
 type Flat struct {
 	ID      int     `json:"id"`
-	Owner   Owner   `json:"owner"`
 	Address Address `json:"address"`
 	Virtual bool    `json:"virtual"`
+	// Owner убран отсюда, он теперь в Account
 }
 
 type Owner struct {
@@ -102,4 +102,41 @@ type ActionTokenInfo struct {
 	UseCount     int    `json:"useCount"`
 	ExpiryDate   int64  `json:"expiryDate"`
 	SubscriberId int    `json:"subscriberId"`
+}
+
+// Connection - структура для /connections endpoint
+type Connection struct {
+	ID      int     `json:"id"`
+	Account Account `json:"account"`
+	Flat    Flat    `json:"flat"`
+	Blocked bool    `json:"blocked"`
+}
+
+type Account struct {
+	ID      int   `json:"id"`
+	Owner   Owner `json:"owner"`
+	Blocked bool  `json:"blocked"`
+}
+
+// EntranceService - структура для парсинга services из /entrances
+type EntranceService struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// EntranceResponse - структура для /entrances
+type EntranceResponse struct {
+	Content []EntranceItem `json:"content"`
+}
+
+type EntranceItem struct {
+	ID       int               `json:"id"`
+	Services []EntranceService `json:"services"`
+}
+
+// ServiceInfo - информация о сервисе для хранения в памяти
+type ServiceInfo struct {
+	ID   int
+	Type string
 }

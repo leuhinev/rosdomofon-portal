@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -44,7 +45,7 @@ func main() {
 	defer db.Close()
 
 	memDB := memorydb.New()
-	rosClient := rosdomofon.NewClient(cfg.Rosdomofon.Email, cfg.Rosdomofon.Password, cfg.Rosdomofon.ServiceID)
+	rosClient := rosdomofon.NewClient(cfg.Rosdomofon.Email, cfg.Rosdomofon.Password, cfg.Rosdomofon.ServiceTypes)
 	codeManager := auth.NewCodeManager(cfg.Memcached.Address)
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret)
 
@@ -55,13 +56,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Публичные endpoints (без авторизации)
+	// Публичные endpoints
 	mux.HandleFunc("POST /api/auth/send-code", authHandler.SendCode)
 	mux.HandleFunc("POST /api/auth/verify", authHandler.VerifyCode)
-	//mux.HandleFunc("POST /api/auth/refresh", authHandler.RefreshToken)
 	mux.HandleFunc("POST /api/auth/webview", authHandler.WebViewAuth)
 
-	// Защищенные endpoints (с авторизацией)
+	// Защищенные endpoints
 	mux.Handle("GET /api/user/flats", middleware.Auth(jwtManager)(http.HandlerFunc(flatsHandler.GetUserFlats)))
 	mux.Handle("GET /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.GetCars)))
 	mux.Handle("POST /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.CreateCar)))
@@ -73,56 +73,32 @@ func main() {
 	mux.Handle("PUT /api/keys/", middleware.Auth(jwtManager)(http.HandlerFunc(keysHandler.UpdateKey)))
 	mux.Handle("DELETE /api/keys/", middleware.Auth(jwtManager)(http.HandlerFunc(keysHandler.DeleteKey)))
 
-	// Обработчик для статических файлов и HTML
+	webContent, err := fs.Sub(webFS, "web")
+	if err != nil {
+		slog.Error("failed to load web content", "error", err)
+		os.Exit(1)
+	}
+
+	staticFS := http.FileServer(http.FS(webContent))
+	mux.Handle("/static/", staticFS)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// Логируем запрос
-		slog.Debug("serving file", "path", r.URL.Path)
+		if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+			indexFile, err := webContent.Open("index.html")
+			if err != nil {
+				slog.Error("failed to open index.html", "error", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			defer indexFile.Close()
 
-		// Убираем слеш в начале
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
-		}
-
-		// Открываем файл из встроенной FS
-		file, err := webFS.Open("web" + path)
-		if err != nil {
-			slog.Debug("file not found", "path", "web"+path, "error", err)
-			http.NotFound(w, r)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if _, err := io.Copy(w, indexFile); err != nil {
+				slog.Error("failed to copy index.html", "error", err)
+			}
 			return
 		}
-		defer file.Close()
-
-		// Получаем информацию о файле
-		stat, err := file.Stat()
-		if err != nil {
-			slog.Error("failed to stat file", "path", path, "error", err)
-			http.NotFound(w, r)
-			return
-		}
-
-		// Устанавливаем правильный Content-Type
-		if stat.IsDir() {
-			http.NotFound(w, r)
-			return
-		}
-
-		// Определяем MIME тип по расширению
-		contentType := "text/plain"
-		if len(path) > 5 && path[len(path)-5:] == ".html" {
-			contentType = "text/html; charset=utf-8"
-		} else if len(path) > 4 && path[len(path)-4:] == ".css" {
-			contentType = "text/css; charset=utf-8"
-		} else if len(path) > 3 && path[len(path)-3:] == ".js" {
-			contentType = "application/javascript; charset=utf-8"
-		}
-
-		w.Header().Set("Content-Type", contentType)
-
-		// Копируем содержимое
-		if _, err := io.Copy(w, file); err != nil {
-			slog.Error("failed to copy file", "path", path, "error", err)
-		}
+		http.NotFound(w, r)
 	})
 
 	handler := middleware.Logging(mux)

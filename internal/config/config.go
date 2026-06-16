@@ -2,7 +2,6 @@ package config
 
 import (
 	"github.com/spf13/viper"
-	"strconv"
 )
 
 type Config struct {
@@ -28,7 +27,7 @@ type MySQLConfig struct {
 }
 
 func (c MySQLConfig) DSN() string {
-	return c.User + ":" + c.Password + "@tcp(" + c.Host + ":" + strconv.Itoa(c.Port) + ")/" + c.Database + "?parseTime=true"
+	return c.User + ":" + c.Password + "@tcp(" + c.Host + ":" + string(rune(c.Port)) + ")/" + c.Database + "?parseTime=true"
 }
 
 type MemcachedConfig struct {
@@ -36,10 +35,10 @@ type MemcachedConfig struct {
 }
 
 type RosdomofonConfig struct {
-	Email               string `mapstructure:"email"`
-	Password            string `mapstructure:"password"`
-	ServiceID           int    `mapstructure:"service_id"`
-	SyncIntervalMinutes int    `mapstructure:"sync_interval_minutes"`
+	Email               string   `mapstructure:"email"`
+	Password            string   `mapstructure:"password"`
+	SyncIntervalMinutes int      `mapstructure:"sync_interval_minutes"`
+	ServiceTypes        []string `mapstructure:"service_types"`
 }
 
 type SectionsConfig struct {
@@ -52,11 +51,11 @@ func Load() (*Config, error) {
 	viper.AddConfigPath(".")
 	viper.AddConfigPath("/app")
 
-	// Устанавливаем значения по умолчанию
 	viper.SetDefault("server.port", 8080)
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("sections.enabled", []string{"cars", "keys"})
 	viper.SetDefault("rosdomofon.sync_interval_minutes", 60)
+	viper.SetDefault("rosdomofon.service_types", []string{"VideoSurveillance", "Gate", "HardwareIntercom", "SoftwareIntercom"})
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err

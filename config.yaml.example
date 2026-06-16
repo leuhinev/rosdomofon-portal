@@ -14,9 +14,13 @@ memcached:
 rosdomofon:
   email: "machine@example.com"
   password: "your-password"
-  service_id: 137129
   sync_interval_minutes: 60
-
+  service_types:
+    - Gate
+    - VideoSurveillance
+    - HouseChat
+    - HardwareIntercom
+    - SoftwareIntercom
 sections:
   enabled:
     - cars

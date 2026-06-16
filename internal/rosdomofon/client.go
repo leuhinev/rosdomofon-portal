@@ -12,22 +12,24 @@ import (
 )
 
 type Client struct {
-	httpClient  *http.Client
-	email       string
-	password    string
-	serviceID   int
-	accessToken string
-	tokenExpiry time.Time
-	mu          sync.RWMutex
+	httpClient   *http.Client
+	email        string
+	password     string
+	accessToken  string
+	tokenExpiry  time.Time
+	mu           sync.RWMutex
+	serviceTypes []string
+	serviceInfo  map[int]ServiceInfo
 }
 
-func NewClient(email, password string, serviceID int) *Client {
-	slog.Debug("creating rosdomofon client", "email", email, "service_id", serviceID)
+func NewClient(email, password string, serviceTypes []string) *Client {
+	slog.Info("creating rosdomofon client", "email", email, "service_types", serviceTypes)
 	return &Client{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		email:      email,
-		password:   password,
-		serviceID:  serviceID,
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		email:        email,
+		password:     password,
+		serviceTypes: serviceTypes,
+		serviceInfo:  make(map[int]ServiceInfo),
 	}
 }
 
@@ -90,7 +92,7 @@ func (c *Client) refreshToken() (string, error) {
 	slog.Info("token obtained successfully",
 		"expires_in", tokenResp.ExpiresIn,
 		"expires_at", c.tokenExpiry,
-		"token_preview", tokenResp.AccessToken[:20]+"...")
+		"token_preview", c.accessToken[:20]+"...")
 
 	return c.accessToken, nil
 }
@@ -141,6 +143,162 @@ func (c *Client) VerifyActionToken(actionToken string) (*ActionTokenInfo, error)
 
 	slog.Info("action token verified", "subscriber_id", info.SubscriberId)
 	return &info, nil
+}
+
+// GetConnections - получает все связи для конкретного сервиса
+func (c *Client) GetConnections(serviceID int) ([]Connection, error) {
+	slog.Info("getting connections for service", "service_id", serviceID)
+
+	token, err := c.GetToken()
+	if err != nil {
+		slog.Error("failed to get token", "error", err)
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://rdba.rosdomofon.com/abonents-service/api/v1/services/%d/connections", serviceID)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		slog.Error("failed to create connections request", "error", err)
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("failed to send connections request", "error", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read connections response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("connections response", "status", resp.StatusCode, "body_length", len(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("connections request failed", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("connections request failed: %d", resp.StatusCode)
+	}
+
+	var connections []Connection
+	if err := json.Unmarshal(body, &connections); err != nil {
+		slog.Error("failed to parse connections response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("connections loaded", "count", len(connections))
+	return connections, nil
+}
+
+// getEntrancesWithServices - получает список подъездов с услугами и сохраняет serviceInfo
+func (c *Client) getEntrancesWithServices() ([]EntranceItem, error) {
+	slog.Info("getting entrances with services")
+
+	token, err := c.GetToken()
+	if err != nil {
+		slog.Error("failed to get token", "error", err)
+		return nil, err
+	}
+
+	url := "https://rdba.rosdomofon.com/abonents-service/api/v1/entrances"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		slog.Error("failed to create entrances request", "error", err)
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("failed to send entrances request", "error", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read entrances response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("entrances response", "status", resp.StatusCode, "body_length", len(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("entrances request failed", "status", resp.StatusCode, "body", string(body))
+		return nil, fmt.Errorf("entrances request failed: %d", resp.StatusCode)
+	}
+
+	var response EntranceResponse
+	if err := json.Unmarshal(body, &response); err != nil {
+		slog.Error("failed to parse entrances response", "error", err)
+		return nil, err
+	}
+
+	// Сохраняем информацию о сервисах
+	c.mu.Lock()
+	for _, item := range response.Content {
+		for _, svc := range item.Services {
+			c.serviceInfo[svc.ID] = ServiceInfo{
+				ID:   svc.ID,
+				Type: svc.Type,
+			}
+		}
+	}
+	c.mu.Unlock()
+
+	slog.Info("entrances loaded", "count", len(response.Content), "services_count", len(c.serviceInfo))
+	return response.Content, nil
+}
+
+// GetServiceInfo - возвращает информацию о сервисе по ID
+func (c *Client) GetServiceInfo(serviceID int) (ServiceInfo, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	info, ok := c.serviceInfo[serviceID]
+	return info, ok
+}
+
+// GetFilteredServiceIDs - возвращает список service_id, удовлетворяющих фильтру по типам
+func (c *Client) GetFilteredServiceIDs() ([]int, error) {
+	slog.Info("getting filtered service IDs", "types", c.serviceTypes)
+
+	entrances, err := c.getEntrancesWithServices()
+	if err != nil {
+		return nil, err
+	}
+
+	serviceIDs := make(map[int]bool)
+	serviceTypesSet := make(map[string]bool)
+	for _, st := range c.serviceTypes {
+		serviceTypesSet[st] = true
+	}
+
+	if len(c.serviceTypes) == 0 {
+		slog.Warn("no service types in config, loading all services")
+	}
+
+	for _, entrance := range entrances {
+		for _, svc := range entrance.Services {
+			shouldInclude := len(c.serviceTypes) == 0 || serviceTypesSet[svc.Type]
+			if shouldInclude {
+				serviceIDs[svc.ID] = true
+				slog.Debug("service accepted", "id", svc.ID, "type", svc.Type)
+			} else {
+				slog.Debug("service filtered out", "id", svc.ID, "type", svc.Type)
+			}
+		}
+	}
+
+	var ids []int
+	for id := range serviceIDs {
+		ids = append(ids, id)
+	}
+
+	slog.Info("filtered services", "total", len(ids), "types", c.serviceTypes)
+	return ids, nil
 }
 
 func (c *Client) SendPush(phone int64, code string) error {

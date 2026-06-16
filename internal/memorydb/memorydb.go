@@ -38,7 +38,6 @@ func (db *MemoryDB) Update(data map[string]rosdomofon.OwnerInfo, flats map[int]s
 
 	for phone, info := range data {
 		db.ownerToPhone[info.OwnerID] = phone
-		// subscriber_id = owner_id (из API РосДомофона)
 		db.subscriberToPhone[info.OwnerID] = phone
 	}
 }
