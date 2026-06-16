@@ -14,22 +14,14 @@ function escapeHtml(text) {
 }
 
 function setFlats(flatsData) {
-    console.log('cars.js: setFlats received', flatsData?.length, 'flats');
     flats = flatsData;
 }
 
 async function loadCars() {
-    console.log('cars.js: loadCars started, flats length:', flats.length);
     try {
         const cars = await api.request('/api/cars');
-        console.log('cars.js: received', cars.length, 'cars');
         cachedCars = cars;
         const container = document.getElementById('cars-list');
-
-        if (!container) {
-            console.error('cars.js: cars-list element not found');
-            return;
-        }
 
         if (cars.length === 0) {
             container.innerHTML = '<p class="empty-message">📭 Нет добавленных автомобилей</p>';
@@ -37,12 +29,17 @@ async function loadCars() {
         }
 
         container.innerHTML = cars.map(car => {
-            const daysUntilExpiry = Math.ceil((new Date(car.ExpiresAt) - new Date()) / (1000 * 60 * 60 * 24));
+            const expiryDate = new Date(car.ExpiresAt);
+            const now = new Date();
+            const daysUntilExpiry = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
             const showExtend = daysUntilExpiry <= 7 && daysUntilExpiry > 0;
             const mainPhoto = car.Photos?.find(p => p.IsMain) || car.Photos?.[0];
             const photoSrc = mainPhoto ? mainPhoto.PhotoData : '';
-            const flatInfo = flats.find(f => f.flat_id === car.FlatID);
-            const flatAddress = flatInfo ? flatInfo.address : 'Адрес не найден (ID: ' + car.FlatID + ')';
+            const flatAddress = flats.find(f => f.flat_id === car.FlatID)?.address || 'Адрес не найден';
+
+            // Форматируем дату и время
+            const expiryDateStr = expiryDate.toLocaleDateString('ru-RU');
+            const expiryTimeStr = expiryDate.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 
             return `
             <div class="car-item" data-id="${car.ID}">
@@ -67,20 +64,16 @@ async function loadCars() {
                     ${car.NotifyOnEntry ? '<span>🚗 Въезд</span>' : ''}
                     ${car.NotifyOnExit ? '<span>🏁 Выезд</span>' : ''}
                 </div>
-                <div class="expiry ${new Date(car.ExpiresAt) < new Date() ? 'expired' : ''}">
-                    📅 Действует до: ${new Date(car.ExpiresAt).toLocaleDateString()}
-                    ${new Date(car.ExpiresAt) < new Date() ? ' (Истек)' : ` (осталось ${daysUntilExpiry} дней)`}
+                <div class="expiry ${expiryDate < now ? 'expired' : ''}">
+                    📅 Действует до: ${expiryDateStr} ${expiryTimeStr}
+                    ${expiryDate < now ? ' (Истек)' : ` (осталось ${daysUntilExpiry} дней)`}
                 </div>
             </div>
         `}).join('');
-        console.log('cars.js: rendering complete');
     } catch (err) {
-        console.error('cars.js: loadCars error:', err);
-        const container = document.getElementById('cars-list');
-        if (container) {
-            container.innerHTML = '<p class="error-message">❌ Ошибка загрузки автомобилей: ' + err.message + '</p>';
-        }
-        throw err;
+        console.error('Error loading cars:', err);
+        showMessage('❌ ' + err.message);
+        document.getElementById('cars-list').innerHTML = '<p class="error-message">❌ Ошибка загрузки автомобилей</p>';
     }
 }
 
@@ -93,6 +86,9 @@ async function extendCar(id) {
                 <div class="form-group">
                     <label for="extend_days">Выберите период:</label>
                     <select id="extend_days" required>
+                        <option value="1">1 день</option>
+                        <option value="3">3 дня</option>
+                        <option value="7">1 неделя</option>
                         <option value="30">1 месяц</option>
                         <option value="90">3 месяца</option>
                         <option value="180">6 месяцев</option>
@@ -122,12 +118,12 @@ async function extendCar(id) {
 
     if (days) {
         try {
-            await api.request(`/api/cars/extend/${id}`, {
+            const result = await api.request(`/api/cars/extend/${id}`, {
                 method: 'POST',
                 body: JSON.stringify({ additional_days: days })
             });
+            showMessage('✅ ' + (result.message || 'Срок действия продлён'), false);
             await loadCars();
-            showMessage('✅ Срок действия продлён', false);
         } catch (err) {
             showMessage('❌ ' + err.message);
         }
@@ -211,7 +207,6 @@ async function addCar(flatsList) {
     form.onsubmit = async (e) => {
         e.preventDefault();
 
-        // Скрываем предыдущую ошибку
         errorDiv.style.display = 'none';
         errorDiv.textContent = '';
 
@@ -253,7 +248,6 @@ async function addCar(flatsList) {
         } catch (err) {
             errorDiv.textContent = '❌ ' + err.message;
             errorDiv.style.display = 'block';
-            // Подсвечиваем поле с номером
             const plateInput = document.getElementById('plate_number');
             plateInput.style.borderColor = '#ef4444';
             setTimeout(() => {
@@ -332,9 +326,9 @@ async function editCar(id) {
             notify_on_exit: document.getElementById('notify_exit').checked
         };
         try {
-            await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
+            const result = await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
-            showMessage('✅ Изменения сохранены', false);
+            showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
             await loadCars();
         } catch (err) {
             showMessage('❌ ' + err.message);
@@ -349,8 +343,8 @@ async function editCar(id) {
 
 async function deleteCar(id) {
     try {
-        await api.request(`/api/cars/${id}`, { method: 'DELETE' });
-        showMessage('✅ Автомобиль удалён', false);
+        const result = await api.request(`/api/cars/${id}`, { method: 'DELETE' });
+        showMessage('✅ ' + (result.message || 'Автомобиль удалён'), false);
         await loadCars();
     } catch (err) {
         showMessage('❌ ' + err.message);
