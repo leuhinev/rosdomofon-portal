@@ -7,7 +7,7 @@ import (
 
 type Car struct {
 	ID             int
-	FlatID         int
+	AddressID      int
 	PlateID        int
 	PlateNumber    string
 	Comment        string
@@ -36,6 +36,29 @@ func (s *Storage) GetOrCreatePlateNumber(plateNumber string) (int, error) {
 	return plate.ID, nil
 }
 
+// GetOrCreateAddress - создает запись адреса, если её нет, или возвращает существующую
+func (s *Storage) GetOrCreateAddress(streetID, houseID, entranceID, flatNumber int, addressStr string) (int, error) {
+	var addr Address
+	result := s.DB.Where("street_id = ? AND house_id = ? AND entrance_id = ? AND flat_number = ?",
+		streetID, houseID, entranceID, flatNumber).First(&addr)
+	if result.Error == nil {
+		return addr.ID, nil
+	}
+
+	addr = Address{
+		StreetID:   streetID,
+		HouseID:    houseID,
+		EntranceID: entranceID,
+		FlatNumber: flatNumber,
+		AddressStr: addressStr,
+	}
+	result = s.DB.Create(&addr)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return addr.ID, nil
+}
+
 func (s *Storage) CreateCar(car *Car) error {
 	plateID, err := s.GetOrCreatePlateNumber(car.PlateNumber)
 	if err != nil {
@@ -43,7 +66,7 @@ func (s *Storage) CreateCar(car *Car) error {
 	}
 
 	dbCar := &UserCar{
-		FlatID:         car.FlatID,
+		AddressID:      car.AddressID,
 		PlateID:        plateID,
 		Comment:        car.Comment,
 		AutoOpen:       car.AutoOpen,
@@ -66,13 +89,13 @@ func (s *Storage) CreateCar(car *Car) error {
 	return nil
 }
 
-func (s *Storage) GetCarsByFlatIDs(flatIDs []int) ([]Car, error) {
-	if len(flatIDs) == 0 {
+func (s *Storage) GetCarsByAddressIDs(addressIDs []int) ([]Car, error) {
+	if len(addressIDs) == 0 {
 		return []Car{}, nil
 	}
 
 	var dbCars []UserCar
-	result := s.DB.Where("flat_id IN ?", flatIDs).Order("id DESC").Find(&dbCars)
+	result := s.DB.Where("address_id IN ?", addressIDs).Order("id DESC").Find(&dbCars)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -82,7 +105,6 @@ func (s *Storage) GetCarsByFlatIDs(flatIDs []int) ([]Car, error) {
 		var plate PlateNumber
 		s.DB.First(&plate, dbCar.PlateID)
 
-		// Получаем фото по plate_id (номеру), а не по car_id
 		var dbPhotos []CarPhotoDB
 		s.DB.Where("plate_id = ?", plate.ID).Order("is_main DESC").Find(&dbPhotos)
 
@@ -99,7 +121,7 @@ func (s *Storage) GetCarsByFlatIDs(flatIDs []int) ([]Car, error) {
 
 		cars[i] = Car{
 			ID:             dbCar.ID,
-			FlatID:         dbCar.FlatID,
+			AddressID:      dbCar.AddressID,
 			PlateID:        dbCar.PlateID,
 			PlateNumber:    plate.PlateNumber,
 			Comment:        dbCar.Comment,
@@ -116,9 +138,9 @@ func (s *Storage) GetCarsByFlatIDs(flatIDs []int) ([]Car, error) {
 	return cars, nil
 }
 
-func (s *Storage) UpdateCar(id int, flatID int, comment string, autoOpen, notifyOnDetect, notifyOnEntry, notifyOnExit bool) error {
+func (s *Storage) UpdateCar(id int, addressID int, comment string, autoOpen, notifyOnDetect, notifyOnEntry, notifyOnExit bool) error {
 	result := s.DB.Model(&UserCar{}).
-		Where("id = ? AND flat_id = ?", id, flatID).
+		Where("id = ? AND address_id = ?", id, addressID).
 		Updates(map[string]interface{}{
 			"comment":          comment,
 			"auto_open":        autoOpen,
@@ -129,37 +151,35 @@ func (s *Storage) UpdateCar(id int, flatID int, comment string, autoOpen, notify
 	return result.Error
 }
 
-func (s *Storage) ExtendCarExpiry(id int, flatID int, additionalDays int) error {
+func (s *Storage) ExtendCarExpiry(id int, addressID int, additionalDays int) error {
 	var car UserCar
-	result := s.DB.Where("id = ? AND flat_id = ?", id, flatID).First(&car)
+	result := s.DB.Where("id = ? AND address_id = ?", id, addressID).First(&car)
 	if result.Error != nil {
 		return result.Error
 	}
 
 	newExpiry := time.Unix(car.ExpiresAt, 0).AddDate(0, 0, additionalDays)
 	result = s.DB.Model(&UserCar{}).
-		Where("id = ? AND flat_id = ?", id, flatID).
+		Where("id = ? AND address_id = ?", id, addressID).
 		Update("expires_at", newExpiry.Unix())
 	return result.Error
 }
 
-func (s *Storage) DeleteCar(id, flatID int) error {
-	result := s.DB.Where("id = ? AND flat_id = ?", id, flatID).Delete(&UserCar{})
+func (s *Storage) DeleteCar(id, addressID int) error {
+	result := s.DB.Where("id = ? AND address_id = ?", id, addressID).Delete(&UserCar{})
 	return result.Error
 }
 
-func (s *Storage) CarBelongsToFlat(carID, flatID int) bool {
+func (s *Storage) CarBelongsToAddress(carID, addressID int) bool {
 	var count int64
-	s.DB.Model(&UserCar{}).Where("id = ? AND flat_id = ?", carID, flatID).Count(&count)
+	s.DB.Model(&UserCar{}).Where("id = ? AND address_id = ?", carID, addressID).Count(&count)
 	return count > 0
 }
 
-// Проверка существования дубликата номера для квартиры
-func (s *Storage) IsCarExists(flatID int, plateNumber string) (bool, error) {
+func (s *Storage) IsCarExists(addressID int, plateNumber string) (bool, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
 	if result.Error != nil {
-		// Если номер не найден, дубликата нет
 		if result.Error == gorm.ErrRecordNotFound {
 			return false, nil
 		}
@@ -167,7 +187,7 @@ func (s *Storage) IsCarExists(flatID int, plateNumber string) (bool, error) {
 	}
 
 	var count int64
-	s.DB.Model(&UserCar{}).Where("flat_id = ? AND plate_id = ?", flatID, plate.ID).Count(&count)
+	s.DB.Model(&UserCar{}).Where("address_id = ? AND plate_id = ?", addressID, plate.ID).Count(&count)
 	return count > 0, nil
 }
 
@@ -214,7 +234,6 @@ func (s *Storage) DeleteCarPhotoByPlate(plateNumber string, photoID int) error {
 	return result.Error
 }
 
-// Обновление фото
 func (s *Storage) UpdateCarPhotoByPlate(plateNumber string, photoID int, photoData string, isMain bool) error {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)

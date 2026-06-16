@@ -6,15 +6,23 @@ import (
 	"log/slog"
 )
 
-type OwnerInfo struct {
-	OwnerID int
-	FlatIDs []int
+type AddressComponents struct {
+	StreetID   int
+	HouseID    int
+	EntranceID int
+	FlatNumber int
+	AddressStr string
 }
 
 type SyncedData struct {
-	PhoneToOwner  map[string]OwnerInfo
-	FlatToAddress map[int]string
-	OwnerToFlats  map[int][]int
+	PhoneToOwner     map[string]OwnerInfo
+	AddressToID      map[AddressComponents]int // map[компоненты адреса] -> address_id
+	OwnerToAddresses map[int][]int             // owner_id -> []address_id
+}
+
+type OwnerInfo struct {
+	OwnerID    int
+	AddressIDs []int // теперь храним address_id вместо flat_id
 }
 
 func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
@@ -31,17 +39,20 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 	if len(serviceIDs) == 0 {
 		slog.Warn("no services matched the filter")
 		return &SyncedData{
-			PhoneToOwner:  make(map[string]OwnerInfo),
-			FlatToAddress: make(map[int]string),
-			OwnerToFlats:  make(map[int][]int),
+			PhoneToOwner:     make(map[string]OwnerInfo),
+			AddressToID:      make(map[AddressComponents]int),
+			OwnerToAddresses: make(map[int][]int),
 		}, nil
 	}
 
 	data := &SyncedData{
-		PhoneToOwner:  make(map[string]OwnerInfo),
-		FlatToAddress: make(map[int]string),
-		OwnerToFlats:  make(map[int][]int),
+		PhoneToOwner:     make(map[string]OwnerInfo),
+		AddressToID:      make(map[AddressComponents]int),
+		OwnerToAddresses: make(map[int][]int),
 	}
+
+	// Временный кеш для address_id, чтобы не создавать дубли
+	addressCache := make(map[AddressComponents]int)
 
 	for _, serviceID := range serviceIDs {
 		svcInfo, ok := c.GetServiceInfo(serviceID)
@@ -66,56 +77,77 @@ func (c *Client) Sync(ctx context.Context) (*SyncedData, error) {
 			}
 
 			flat := conn.Flat
-			address := fmt.Sprintf("%s, %s, д.%s, кв.%d",
+			addressStr := fmt.Sprintf("%s, %s, д.%s, кв.%d",
 				flat.Address.City,
 				flat.Address.Street.Name,
 				flat.Address.House.Number,
 				flat.Address.Flat)
 
-			data.FlatToAddress[flat.ID] = address
+			// Создаём компоненты адреса
+			addrComp := AddressComponents{
+				StreetID:   flat.Address.Street.ID,
+				HouseID:    flat.Address.House.ID,
+				EntranceID: flat.Address.Entrance.ID,
+				FlatNumber: flat.Address.Flat,
+				AddressStr: addressStr,
+			}
 
-			// Используем владельца из account, а не из flat
+			// Получаем или создаём address_id
+			addressID, ok := addressCache[addrComp]
+			if !ok {
+				// В реальном коде здесь нужно создавать запись в БД через storage
+				// Но в sync мы только собираем данные, БД обновляется отдельно
+				// Поэтому просто генерируем временный ID для этого цикла
+				addressID = len(addressCache) + 1
+				addressCache[addrComp] = addressID
+				data.AddressToID[addrComp] = addressID
+			}
+
+			// Используем владельца из account
 			phone := fmt.Sprintf("+%d", conn.Account.Owner.Phone)
 			ownerID := conn.Account.Owner.ID
 
+			// Обновляем данные по владельцу
 			info := data.PhoneToOwner[phone]
 			info.OwnerID = ownerID
+			// Добавляем address_id, если его ещё нет
 			found := false
-			for _, fid := range info.FlatIDs {
-				if fid == flat.ID {
+			for _, aid := range info.AddressIDs {
+				if aid == addressID {
 					found = true
 					break
 				}
 			}
 			if !found {
-				info.FlatIDs = append(info.FlatIDs, flat.ID)
+				info.AddressIDs = append(info.AddressIDs, addressID)
 			}
 			data.PhoneToOwner[phone] = info
 
-			flats := data.OwnerToFlats[ownerID]
-			foundFlat := false
-			for _, fid := range flats {
-				if fid == flat.ID {
-					foundFlat = true
+			// Добавляем в ownerToAddresses
+			addresses := data.OwnerToAddresses[ownerID]
+			foundAddr := false
+			for _, aid := range addresses {
+				if aid == addressID {
+					foundAddr = true
 					break
 				}
 			}
-			if !foundFlat {
-				data.OwnerToFlats[ownerID] = append(data.OwnerToFlats[ownerID], flat.ID)
+			if !foundAddr {
+				data.OwnerToAddresses[ownerID] = append(data.OwnerToAddresses[ownerID], addressID)
 			}
 
 			slog.Debug("processed connection",
-				"flat_id", flat.ID,
+				"address_id", addressID,
+				"address", addressStr,
 				"owner_id", ownerID,
-				"phone", phone,
-				"address", address)
+				"phone", phone)
 		}
 	}
 
 	slog.Info("sync completed",
 		"unique_phones", len(data.PhoneToOwner),
-		"total_flats", len(data.FlatToAddress),
-		"unique_owners", len(data.OwnerToFlats))
+		"unique_addresses", len(data.AddressToID),
+		"unique_owners", len(data.OwnerToAddresses))
 
 	return data, nil
 }

@@ -27,7 +27,6 @@ func NewAuthHandler(jm *auth.JWTManager, cm *auth.CodeManager, rc *rosdomofon.Cl
 	}
 }
 
-// SendCode - запрос кода для обычной авторизации (браузер)
 func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
@@ -100,7 +99,6 @@ func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "code sent"})
 }
 
-// VerifyCode - проверка кода для обычной авторизации (браузер)
 func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
@@ -132,14 +130,16 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerID, flatIDs, ok := h.memoryDB.GetOwnerByPhone(normalizedPhone)
+	ownerID, addressIDs, ok := h.memoryDB.GetOwnerByPhone(normalizedPhone)
 	if !ok {
 		slog.Error("user not found after verification", "phone", normalizedPhone)
 		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
 		return
 	}
 
-	token, err := h.jwtManager.Generate(ownerID, flatIDs)
+	slog.Info("user verified, generating token", "phone", normalizedPhone, "owner_id", ownerID, "address_ids", addressIDs)
+
+	token, err := h.jwtManager.Generate(ownerID, addressIDs)
 	if err != nil {
 		slog.Error("failed to generate token", "error", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
@@ -150,7 +150,6 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"access_token": token})
 }
 
-// WebViewAuth - авторизация через токен из WebView (из URL параметра)
 func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ActionToken string `json:"action_token"`
@@ -167,7 +166,8 @@ func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверяем токен в API РосДомофона
+	slog.Info("WebViewAuth called", "action_token_preview", req.ActionToken[:8]+"...")
+
 	tokenInfo, err := h.rosClient.VerifyActionToken(req.ActionToken)
 	if err != nil {
 		slog.Error("failed to verify action token", "error", err)
@@ -175,8 +175,9 @@ func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// По subscriber_id находим телефон и flat_ids
-	phone, flatIDs, ok := h.memoryDB.GetOwnerBySubscriberID(tokenInfo.SubscriberId)
+	slog.Info("action token verified", "subscriber_id", tokenInfo.SubscriberId)
+
+	phone, addressIDs, ok := h.memoryDB.GetOwnerBySubscriberID(tokenInfo.SubscriberId)
 	if !ok {
 		slog.Error("subscriber not found", "subscriber_id", tokenInfo.SubscriberId)
 		http.Error(w, `{"error":"subscriber not found in system"}`, http.StatusNotFound)
@@ -184,9 +185,9 @@ func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ownerID, _, _ := h.memoryDB.GetOwnerByPhone(phone)
+	slog.Info("subscriber data", "phone", phone, "owner_id", ownerID, "address_ids", addressIDs)
 
-	// Генерируем наш JWT
-	jwtToken, err := h.jwtManager.Generate(ownerID, flatIDs)
+	jwtToken, err := h.jwtManager.Generate(ownerID, addressIDs)
 	if err != nil {
 		slog.Error("failed to generate token", "error", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)

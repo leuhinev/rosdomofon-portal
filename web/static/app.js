@@ -1,11 +1,11 @@
 import { getToken, setToken, logout, showMessage, checkWebViewToken } from './auth.js';
 import api from './api.js';
-import { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setFlats as setCarsFlats } from './cars.js';
-import { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setFlats as setKeysFlats } from './keys.js';
+import { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setAddresses as setCarsAddresses } from './cars.js';
+import { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setAddresses as setKeysAddresses } from './keys.js';
 import { showPhotoGallery } from './gallery.js';
 import { closeModal } from './modal.js';
 
-let flats = [];
+let addresses = [];
 
 function hideLoading() {
     const overlay = document.getElementById('loading-overlay');
@@ -17,14 +17,14 @@ function hideLoading() {
     }
 }
 
-async function loadFlats() {
-    console.log('app.js: loading flats...');
-    const data = await api.request('/api/user/flats');
-    console.log('app.js: flats loaded:', data.length, 'flats');
-    flats = data;
-    setCarsFlats(flats);
-    setKeysFlats(flats);
-    return flats;
+async function loadAddresses() {
+    console.log('app.js: loading addresses...');
+    const data = await api.request('/api/user/addresses');
+    console.log('app.js: addresses loaded:', data.length, 'addresses');
+    addresses = data;
+    setCarsAddresses(addresses);
+    setKeysAddresses(addresses);
+    return addresses;
 }
 
 async function initPortal() {
@@ -36,7 +36,7 @@ async function initPortal() {
             overlay.classList.remove('hide');
         }
 
-        await loadFlats();
+        await loadAddresses();
         await loadCars();
         await loadKeys();
 
@@ -56,14 +56,12 @@ async function initPortal() {
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('app.js: DOM loaded');
 
-    // Сначала проверяем WebView токен в URL
     const webViewSuccess = await checkWebViewToken();
 
     if (webViewSuccess) {
         console.log('WebView auth successful, initializing portal');
         await initPortal();
     } else {
-        // Проверяем обычный токен в localStorage
         const savedToken = localStorage.getItem('token');
         if (savedToken) {
             setToken(savedToken);
@@ -190,15 +188,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const addCarBtn = document.getElementById('add-car-btn');
     const addKeyBtn = document.getElementById('add-key-btn');
-    if (addCarBtn) addCarBtn.onclick = () => addCar(flats);
-    if (addKeyBtn) addKeyBtn.onclick = () => addKey(flats);
+    if (addCarBtn) addCarBtn.onclick = () => addCar(addresses);
+    if (addKeyBtn) addKeyBtn.onclick = () => addKey(addresses);
 
-    window.addCar = () => addCar(flats);
+    window.addCar = () => addCar(addresses);
     window.editCar = editCar;
     window.deleteCar = deleteCar;
     window.confirmDeleteCar = confirmDeleteCar;
     window.extendCar = extendCar;
-    window.addKey = () => addKey(flats);
+    window.addKey = () => addKey(addresses);
     window.editKey = editKey;
     window.deleteKey = deleteKey;
     window.confirmDeleteKey = confirmDeleteKey;

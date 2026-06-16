@@ -6,7 +6,7 @@ import (
 
 type Key struct {
 	ID        int
-	FlatID    int
+	AddressID int
 	KeyData   string
 	Comment   string
 	CreatedAt time.Time
@@ -15,9 +15,9 @@ type Key struct {
 
 func (s *Storage) CreateKey(key *Key) error {
 	dbKey := &UserKey{
-		FlatID:  key.FlatID,
-		KeyData: key.KeyData,
-		Comment: key.Comment,
+		AddressID: key.AddressID,
+		KeyData:   key.KeyData,
+		Comment:   key.Comment,
 	}
 
 	result := s.DB.Create(dbKey)
@@ -31,13 +31,13 @@ func (s *Storage) CreateKey(key *Key) error {
 	return nil
 }
 
-func (s *Storage) GetKeysByFlatIDs(flatIDs []int) ([]Key, error) {
-	if len(flatIDs) == 0 {
+func (s *Storage) GetKeysByAddressIDs(addressIDs []int) ([]Key, error) {
+	if len(addressIDs) == 0 {
 		return []Key{}, nil
 	}
 
 	var dbKeys []UserKey
-	result := s.DB.Where("flat_id IN ?", flatIDs).Order("id DESC").Find(&dbKeys)
+	result := s.DB.Where("address_id IN ?", addressIDs).Order("id DESC").Find(&dbKeys)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -46,7 +46,7 @@ func (s *Storage) GetKeysByFlatIDs(flatIDs []int) ([]Key, error) {
 	for i, dbKey := range dbKeys {
 		keys[i] = Key{
 			ID:        dbKey.ID,
-			FlatID:    dbKey.FlatID,
+			AddressID: dbKey.AddressID,
 			KeyData:   dbKey.KeyData,
 			Comment:   dbKey.Comment,
 			CreatedAt: time.Unix(dbKey.CreatedAt, 0),
@@ -56,9 +56,9 @@ func (s *Storage) GetKeysByFlatIDs(flatIDs []int) ([]Key, error) {
 	return keys, nil
 }
 
-func (s *Storage) UpdateKey(id, flatID int, keyData, comment string) error {
+func (s *Storage) UpdateKey(id, addressID int, keyData, comment string) error {
 	result := s.DB.Model(&UserKey{}).
-		Where("id = ? AND flat_id = ?", id, flatID).
+		Where("id = ? AND address_id = ?", id, addressID).
 		Updates(map[string]interface{}{
 			"key_data": keyData,
 			"comment":  comment,
@@ -66,13 +66,13 @@ func (s *Storage) UpdateKey(id, flatID int, keyData, comment string) error {
 	return result.Error
 }
 
-func (s *Storage) DeleteKey(id, flatID int) error {
-	result := s.DB.Where("id = ? AND flat_id = ?", id, flatID).Delete(&UserKey{})
+func (s *Storage) DeleteKey(id, addressID int) error {
+	result := s.DB.Where("id = ? AND address_id = ?", id, addressID).Delete(&UserKey{})
 	return result.Error
 }
 
-func (s *Storage) KeyBelongsToFlat(keyID, flatID int) bool {
+func (s *Storage) KeyBelongsToAddress(keyID, addressID int) bool {
 	var count int64
-	s.DB.Model(&UserKey{}).Where("id = ? AND flat_id = ?", keyID, flatID).Count(&count)
+	s.DB.Model(&UserKey{}).Where("id = ? AND address_id = ?", keyID, addressID).Count(&count)
 	return count > 0
 }

@@ -11,6 +11,21 @@ type Storage struct {
 	DB *gorm.DB
 }
 
+// Address - новый справочник адресов со стабильными идентификаторами
+type Address struct {
+	ID         int    `gorm:"primaryKey;autoIncrement"`
+	StreetID   int    `gorm:"not null;index"`
+	HouseID    int    `gorm:"not null;index"`
+	EntranceID int    `gorm:"not null;index"`
+	FlatNumber int    `gorm:"not null"`
+	AddressStr string `gorm:"type:text;not null"` // Кешируем строку адреса для быстрого отображения
+	CreatedAt  int64  `gorm:"autoCreateTime"`
+}
+
+func (Address) TableName() string {
+	return "addresses"
+}
+
 // Таблица для номеров автомобилей (отдельно)
 type PlateNumber struct {
 	ID          int    `gorm:"primaryKey;autoIncrement"`
@@ -25,7 +40,7 @@ func (PlateNumber) TableName() string {
 // Таблица для автомобилей (связь с номерами)
 type UserCar struct {
 	ID             int    `gorm:"primaryKey;autoIncrement"`
-	FlatID         int    `gorm:"not null;index"`
+	AddressID      int    `gorm:"not null;index"` // Внешний ключ на addresses.id
 	PlateID        int    `gorm:"not null;index"`
 	Comment        string `gorm:"type:text"`
 	AutoOpen       bool   `gorm:"default:false"`
@@ -56,8 +71,8 @@ func (CarPhotoDB) TableName() string {
 
 type UserKey struct {
 	ID        int    `gorm:"primaryKey;autoIncrement"`
-	FlatID    int    `gorm:"not null;index"`
-	KeyData   string `gorm:"type:varchar(64);not null;uniqueIndex:idx_flat_key"`
+	AddressID int    `gorm:"not null;index"` // Внешний ключ на addresses.id
+	KeyData   string `gorm:"type:varchar(64);not null;uniqueIndex:idx_address_key"`
 	Comment   string `gorm:"type:text"`
 	CreatedAt int64  `gorm:"autoCreateTime"`
 	UpdatedAt int64  `gorm:"autoUpdateTime"`
@@ -77,14 +92,13 @@ func NewMySQL(dsn string) (*Storage, error) {
 	}
 
 	// Автоматическая миграция
-	err = db.AutoMigrate(&PlateNumber{}, &UserCar{}, &CarPhotoDB{}, &UserKey{})
+	err = db.AutoMigrate(&Address{}, &PlateNumber{}, &UserCar{}, &CarPhotoDB{}, &UserKey{})
 	if err != nil {
 		slog.Error("failed to migrate database", "error", err)
 		return nil, err
 	}
 
 	slog.Info("database migrated successfully")
-
 	return &Storage{DB: db}, nil
 }
 

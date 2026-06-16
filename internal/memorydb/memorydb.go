@@ -1,45 +1,62 @@
 package memorydb
 
 import (
+	"log/slog"
 	"rosdomofon-portal/internal/rosdomofon"
 	"sync"
 )
 
 type MemoryDB struct {
-	mu                sync.RWMutex
-	phoneToOwner      map[string]rosdomofon.OwnerInfo
-	flatToAddress     map[int]string
-	ownerToFlats      map[int][]int
-	ownerToPhone      map[int]string
-	subscriberToPhone map[int]string // subscriber_id -> phone
+	mu                 sync.RWMutex
+	phoneToOwner       map[string]rosdomofon.OwnerInfo
+	addressIDToAddress map[int]string                       // address_id -> строка адреса
+	addressToID        map[rosdomofon.AddressComponents]int // компоненты -> address_id
+	ownerToAddresses   map[int][]int                        // owner_id -> []address_id
+	ownerToPhone       map[int]string
+	subscriberToPhone  map[int]string
 }
 
 func New() *MemoryDB {
 	return &MemoryDB{
-		phoneToOwner:      make(map[string]rosdomofon.OwnerInfo),
-		flatToAddress:     make(map[int]string),
-		ownerToFlats:      make(map[int][]int),
-		ownerToPhone:      make(map[int]string),
-		subscriberToPhone: make(map[int]string),
+		phoneToOwner:       make(map[string]rosdomofon.OwnerInfo),
+		addressIDToAddress: make(map[int]string),
+		addressToID:        make(map[rosdomofon.AddressComponents]int),
+		ownerToAddresses:   make(map[int][]int),
+		ownerToPhone:       make(map[int]string),
+		subscriberToPhone:  make(map[int]string),
 	}
 }
 
-func (db *MemoryDB) Update(data map[string]rosdomofon.OwnerInfo, flats map[int]string, ownerFlats map[int][]int) {
+func (db *MemoryDB) Update(
+	phoneToOwner map[string]rosdomofon.OwnerInfo,
+	addressToID map[rosdomofon.AddressComponents]int,
+	ownerToAddresses map[int][]int,
+) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	db.phoneToOwner = data
-	db.flatToAddress = flats
-	db.ownerToFlats = ownerFlats
+	db.phoneToOwner = phoneToOwner
+	db.addressToID = addressToID
+	db.ownerToAddresses = ownerToAddresses
 
-	// Строим обратные индексы
+	// Строим обратный индекс address_id -> address_str
+	db.addressIDToAddress = make(map[int]string)
+	for addrComp, id := range addressToID {
+		db.addressIDToAddress[id] = addrComp.AddressStr
+	}
+
+	// Строим обратные индексы для телефонов
 	db.ownerToPhone = make(map[int]string)
 	db.subscriberToPhone = make(map[int]string)
-
-	for phone, info := range data {
+	for phone, info := range phoneToOwner {
 		db.ownerToPhone[info.OwnerID] = phone
 		db.subscriberToPhone[info.OwnerID] = phone
 	}
+
+	slog.Debug("memorydb updated",
+		"phones", len(phoneToOwner),
+		"addresses", len(addressToID),
+		"owners", len(ownerToAddresses))
 }
 
 func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
@@ -49,7 +66,7 @@ func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
 	if !ok {
 		return 0, nil, false
 	}
-	return info.OwnerID, info.FlatIDs, true
+	return info.OwnerID, info.AddressIDs, true
 }
 
 func (db *MemoryDB) GetPhoneByOwnerID(ownerID int) (string, bool) {
@@ -73,30 +90,37 @@ func (db *MemoryDB) GetOwnerBySubscriberID(subscriberID int) (string, []int, boo
 		return "", nil, false
 	}
 
-	return phone, info.FlatIDs, true
+	return phone, info.AddressIDs, true
 }
 
-func (db *MemoryDB) GetFlatsByOwner(ownerID int) []int {
+func (db *MemoryDB) GetAddressesByOwner(ownerID int) []int {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	return db.ownerToFlats[ownerID]
+	return db.ownerToAddresses[ownerID]
 }
 
-func (db *MemoryDB) GetAddress(flatID int) string {
+func (db *MemoryDB) GetAddressByAddressID(addressID int) string {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	return db.flatToAddress[flatID]
+	return db.addressIDToAddress[addressID]
 }
 
-func (db *MemoryDB) FlatBelongsToOwner(ownerID, flatID int) bool {
+func (db *MemoryDB) GetAddressIDByComponents(addrComp rosdomofon.AddressComponents) (int, bool) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
-	flats, ok := db.ownerToFlats[ownerID]
+	id, ok := db.addressToID[addrComp]
+	return id, ok
+}
+
+func (db *MemoryDB) AddressBelongsToOwner(ownerID, addressID int) bool {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	addresses, ok := db.ownerToAddresses[ownerID]
 	if !ok {
 		return false
 	}
-	for _, f := range flats {
-		if f == flatID {
+	for _, aid := range addresses {
+		if aid == addressID {
 			return true
 		}
 	}

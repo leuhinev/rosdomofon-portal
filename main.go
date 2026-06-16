@@ -50,7 +50,7 @@ func main() {
 	jwtManager := auth.NewJWTManager(cfg.JWTSecret)
 
 	authHandler := handlers.NewAuthHandler(jwtManager, codeManager, rosClient, memDB)
-	flatsHandler := handlers.NewFlatsHandler(memDB)
+	addressesHandler := handlers.NewAddressesHandler(memDB)
 	carsHandler := handlers.NewCarsHandler(db, memDB)
 	keysHandler := handlers.NewKeysHandler(db, memDB)
 
@@ -62,7 +62,7 @@ func main() {
 	mux.HandleFunc("POST /api/auth/webview", authHandler.WebViewAuth)
 
 	// Защищенные endpoints
-	mux.Handle("GET /api/user/flats", middleware.Auth(jwtManager)(http.HandlerFunc(flatsHandler.GetUserFlats)))
+	mux.Handle("GET /api/user/addresses", middleware.Auth(jwtManager)(http.HandlerFunc(addressesHandler.GetUserAddresses)))
 	mux.Handle("GET /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.GetCars)))
 	mux.Handle("POST /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.CreateCar)))
 	mux.Handle("PUT /api/cars/", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.UpdateCar)))
@@ -117,10 +117,73 @@ func main() {
 		data, err := rosClient.Sync(context.Background())
 		if err != nil {
 			slog.Error("initial sync failed", "error", err)
-		} else {
-			memDB.Update(data.PhoneToOwner, data.FlatToAddress, data.OwnerToFlats)
-			slog.Info("initial sync completed", "owners", len(data.OwnerToFlats), "flats", len(data.FlatToAddress))
+			return
 		}
+
+		slog.Info("sync data received",
+			"unique_phones", len(data.PhoneToOwner),
+			"unique_addresses", len(data.AddressToID),
+			"unique_owners", len(data.OwnerToAddresses))
+
+		// Создаем реальные ID адресов в БД и строим маппинг tempID -> realID
+		tempToReal := make(map[int]int)
+		realAddressToID := make(map[rosdomofon.AddressComponents]int)
+
+		for addrComp, tempID := range data.AddressToID {
+			realID, err := db.GetOrCreateAddress(
+				addrComp.StreetID,
+				addrComp.HouseID,
+				addrComp.EntranceID,
+				addrComp.FlatNumber,
+				addrComp.AddressStr,
+			)
+			if err != nil {
+				slog.Error("failed to save address to DB", "temp_id", tempID, "error", err)
+				continue
+			}
+			tempToReal[tempID] = realID
+			realAddressToID[addrComp] = realID
+			slog.Debug("address mapped", "temp_id", tempID, "real_id", realID, "address", addrComp.AddressStr)
+		}
+
+		// Обновляем PhoneToOwner с реальными ID
+		newPhoneToOwner := make(map[string]rosdomofon.OwnerInfo)
+		for phone, info := range data.PhoneToOwner {
+			newInfo := rosdomofon.OwnerInfo{
+				OwnerID: info.OwnerID,
+			}
+			for _, tempID := range info.AddressIDs {
+				if realID, ok := tempToReal[tempID]; ok {
+					newInfo.AddressIDs = append(newInfo.AddressIDs, realID)
+				} else {
+					slog.Warn("temp ID not found in real mapping", "temp_id", tempID)
+				}
+			}
+			newPhoneToOwner[phone] = newInfo
+		}
+
+		// Обновляем OwnerToAddresses с реальными ID
+		newOwnerToAddresses := make(map[int][]int)
+		for ownerID, tempIDs := range data.OwnerToAddresses {
+			var realIDs []int
+			for _, tempID := range tempIDs {
+				if realID, ok := tempToReal[tempID]; ok {
+					realIDs = append(realIDs, realID)
+				} else {
+					slog.Warn("temp ID not found in real mapping for owner", "owner_id", ownerID, "temp_id", tempID)
+				}
+			}
+			if len(realIDs) > 0 {
+				newOwnerToAddresses[ownerID] = realIDs
+			}
+		}
+
+		// Обновляем память
+		memDB.Update(newPhoneToOwner, realAddressToID, newOwnerToAddresses)
+
+		slog.Info("initial sync completed",
+			"owners", len(newOwnerToAddresses),
+			"addresses", len(realAddressToID))
 	}()
 
 	// Периодическая синхронизация
@@ -137,8 +200,55 @@ func main() {
 					slog.Error("periodic sync failed", "error", err)
 					continue
 				}
-				memDB.Update(data.PhoneToOwner, data.FlatToAddress, data.OwnerToFlats)
-				slog.Info("periodic sync completed", "owners", len(data.OwnerToFlats), "flats", len(data.FlatToAddress))
+
+				// Аналогичная логика обновления с реальными ID
+				tempToReal := make(map[int]int)
+				realAddressToID := make(map[rosdomofon.AddressComponents]int)
+
+				for addrComp, tempID := range data.AddressToID {
+					realID, err := db.GetOrCreateAddress(
+						addrComp.StreetID,
+						addrComp.HouseID,
+						addrComp.EntranceID,
+						addrComp.FlatNumber,
+						addrComp.AddressStr,
+					)
+					if err != nil {
+						slog.Error("failed to save address to DB", "temp_id", tempID, "error", err)
+						continue
+					}
+					tempToReal[tempID] = realID
+					realAddressToID[addrComp] = realID
+				}
+
+				newPhoneToOwner := make(map[string]rosdomofon.OwnerInfo)
+				for phone, info := range data.PhoneToOwner {
+					newInfo := rosdomofon.OwnerInfo{
+						OwnerID: info.OwnerID,
+					}
+					for _, tempID := range info.AddressIDs {
+						if realID, ok := tempToReal[tempID]; ok {
+							newInfo.AddressIDs = append(newInfo.AddressIDs, realID)
+						}
+					}
+					newPhoneToOwner[phone] = newInfo
+				}
+
+				newOwnerToAddresses := make(map[int][]int)
+				for ownerID, tempIDs := range data.OwnerToAddresses {
+					var realIDs []int
+					for _, tempID := range tempIDs {
+						if realID, ok := tempToReal[tempID]; ok {
+							realIDs = append(realIDs, realID)
+						}
+					}
+					if len(realIDs) > 0 {
+						newOwnerToAddresses[ownerID] = realIDs
+					}
+				}
+
+				memDB.Update(newPhoneToOwner, realAddressToID, newOwnerToAddresses)
+				slog.Info("periodic sync completed", "owners", len(newOwnerToAddresses), "addresses", len(realAddressToID))
 			}
 		}()
 	}

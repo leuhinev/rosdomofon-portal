@@ -7,8 +7,8 @@ import (
 )
 
 type Claims struct {
-	OwnerID int   `json:"owner_id"`
-	FlatIDs []int `json:"flat_ids"`
+	OwnerID    int   `json:"owner_id"`
+	AddressIDs []int `json:"address_ids"` // теперь храним address_ids
 	jwt.RegisteredClaims
 }
 
@@ -20,10 +20,10 @@ func NewJWTManager(secret string) *JWTManager {
 	return &JWTManager{secret: []byte(secret)}
 }
 
-func (m *JWTManager) Generate(ownerID int, flatIDs []int) (string, error) {
+func (m *JWTManager) Generate(ownerID int, addressIDs []int) (string, error) {
 	claims := &Claims{
-		OwnerID: ownerID,
-		FlatIDs: flatIDs,
+		OwnerID:    ownerID,
+		AddressIDs: addressIDs,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(60 * 24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -45,20 +45,4 @@ func (m *JWTManager) Verify(tokenStr string) (*Claims, error) {
 		return nil, errors.New("invalid token")
 	}
 	return claims, nil
-}
-
-// Refresh - обновление токена (всегда можно обновить)
-func (m *JWTManager) Refresh(tokenStr string) (string, error) {
-	claims, err := m.Verify(tokenStr)
-	if err != nil {
-		return "", err
-	}
-
-	// Проверяем, что токен не истек
-	if claims.ExpiresAt.Time.Before(time.Now()) {
-		return "", errors.New("token expired")
-	}
-
-	// Генерируем новый токен с новым сроком действия
-	return m.Generate(claims.OwnerID, claims.FlatIDs)
 }

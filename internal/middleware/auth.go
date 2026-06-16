@@ -9,8 +9,8 @@ import (
 type contextKey string
 
 const (
-	OwnerIDKey contextKey = "owner_id"
-	FlatIDsKey contextKey = "flat_ids"
+	OwnerIDKey    contextKey = "owner_id"
+	AddressIDsKey contextKey = "address_ids"
 )
 
 func Auth(jwtManager *auth.JWTManager) func(http.Handler) http.Handler {
@@ -33,7 +33,8 @@ func Auth(jwtManager *auth.JWTManager) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), OwnerIDKey, claims.OwnerID)
-			ctx = context.WithValue(ctx, FlatIDsKey, claims.FlatIDs)
+			// В claims теперь храним address_ids вместо flat_ids
+			ctx = context.WithValue(ctx, AddressIDsKey, claims.AddressIDs)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

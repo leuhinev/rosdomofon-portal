@@ -21,23 +21,37 @@ func NewKeysHandler(s *storage.Storage, mdb *memorydb.MemoryDB) *KeysHandler {
 }
 
 func (h *KeysHandler) GetKeys(w http.ResponseWriter, r *http.Request) {
-	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
+	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
 
-	keys, err := h.storage.GetKeysByFlatIDs(allowedFlats)
+	keys, err := h.storage.GetKeysByAddressIDs(allowedAddresses)
 	if err != nil {
 		slog.Error("failed to get keys", "error", err)
 		http.Error(w, `{"error":"database error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(keys)
+	// Добавляем информацию об адресе для каждого ключа
+	type KeyWithAddress struct {
+		storage.Key
+		Address string `json:"address"`
+	}
+
+	result := make([]KeyWithAddress, len(keys))
+	for i, key := range keys {
+		result[i] = KeyWithAddress{
+			Key:     key,
+			Address: h.memoryDB.GetAddressByAddressID(key.AddressID),
+		}
+	}
+
+	json.NewEncoder(w).Encode(result)
 }
 
 func (h *KeysHandler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		FlatID  int    `json:"flat_id"`
-		KeyData string `json:"key_data"`
-		Comment string `json:"comment"`
+		AddressID int    `json:"address_id"`
+		KeyData   string `json:"key_data"`
+		Comment   string `json:"comment"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
@@ -50,29 +64,28 @@ func (h *KeysHandler) CreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FlatID == 0 {
-		http.Error(w, `{"error":"flat_id is required"}`, http.StatusBadRequest)
+	if req.AddressID == 0 {
+		http.Error(w, `{"error":"address_id is required"}`, http.StatusBadRequest)
 		return
 	}
 
-	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
-	flatAllowed := false
-	for _, fid := range allowedFlats {
-		if fid == req.FlatID {
-			flatAllowed = true
+	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
+	addressAllowed := false
+	for _, aid := range allowedAddresses {
+		if aid == req.AddressID {
+			addressAllowed = true
 			break
 		}
 	}
-
-	if !flatAllowed {
-		http.Error(w, `{"error":"flat not accessible"}`, http.StatusForbidden)
+	if !addressAllowed {
+		http.Error(w, `{"error":"address not accessible"}`, http.StatusForbidden)
 		return
 	}
 
 	key := &storage.Key{
-		FlatID:  req.FlatID,
-		KeyData: req.KeyData,
-		Comment: req.Comment,
+		AddressID: req.AddressID,
+		KeyData:   req.KeyData,
+		Comment:   req.Comment,
 	}
 
 	if err := h.storage.CreateKey(key); err != nil {
@@ -107,23 +120,23 @@ func (h *KeysHandler) UpdateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
+	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
 
-	keys, _ := h.storage.GetKeysByFlatIDs(allowedFlats)
-	var flatID int
+	keys, _ := h.storage.GetKeysByAddressIDs(allowedAddresses)
+	var addressID int
 	for _, key := range keys {
 		if key.ID == id {
-			flatID = key.FlatID
+			addressID = key.AddressID
 			break
 		}
 	}
 
-	if flatID == 0 {
+	if addressID == 0 {
 		http.Error(w, `{"error":"key not found"}`, http.StatusNotFound)
 		return
 	}
 
-	if err := h.storage.UpdateKey(id, flatID, req.KeyData, req.Comment); err != nil {
+	if err := h.storage.UpdateKey(id, addressID, req.KeyData, req.Comment); err != nil {
 		slog.Error("failed to update key", "error", err)
 		http.Error(w, `{"error":"failed to update"}`, http.StatusInternalServerError)
 		return
@@ -141,23 +154,23 @@ func (h *KeysHandler) DeleteKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allowedFlats := r.Context().Value(middleware.FlatIDsKey).([]int)
+	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
 
-	keys, _ := h.storage.GetKeysByFlatIDs(allowedFlats)
-	var flatID int
+	keys, _ := h.storage.GetKeysByAddressIDs(allowedAddresses)
+	var addressID int
 	for _, key := range keys {
 		if key.ID == id {
-			flatID = key.FlatID
+			addressID = key.AddressID
 			break
 		}
 	}
 
-	if flatID == 0 {
+	if addressID == 0 {
 		http.Error(w, `{"error":"key not found"}`, http.StatusNotFound)
 		return
 	}
 
-	if err := h.storage.DeleteKey(id, flatID); err != nil {
+	if err := h.storage.DeleteKey(id, addressID); err != nil {
 		slog.Error("failed to delete key", "error", err)
 		http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
 		return

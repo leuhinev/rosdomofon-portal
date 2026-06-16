@@ -2,7 +2,7 @@ import api from './api.js';
 import { showMessage } from './auth.js';
 import { showConfirm, closeModal } from './modal.js';
 
-let flats = [];
+let addresses = [];
 let cachedKeys = [];
 
 function escapeHtml(text) {
@@ -18,34 +18,20 @@ function maskKey(key) {
     return key.slice(0, 6) + '...' + key.slice(-4);
 }
 
-function setFlats(flatsData) {
-    console.log('keys.js: setFlats received', flatsData?.length, 'flats');
-    flats = flatsData;
+function setAddresses(addressesData) {
+    addresses = addressesData;
 }
 
 async function loadKeys() {
-    console.log('keys.js: loadKeys started, flats length:', flats.length);
     try {
         const keys = await api.request('/api/keys');
-        console.log('keys.js: received', keys.length, 'keys');
         cachedKeys = keys;
         const container = document.getElementById('keys-list');
-
-        if (!container) {
-            console.error('keys.js: keys-list element not found');
-            return;
-        }
-
         if (keys.length === 0) {
             container.innerHTML = '<p class="empty-message">🔐 Нет добавленных ключей</p>';
             return;
         }
-
-        container.innerHTML = keys.map(key => {
-            const flatInfo = flats.find(f => f.flat_id === key.FlatID);
-            const flatAddress = flatInfo ? flatInfo.address : 'Адрес не найден (ID: ' + key.FlatID + ')';
-
-            return `
+        container.innerHTML = keys.map(key => `
             <div class="key-item" data-id="${key.ID}">
                 <div class="key-header">
                     <span class="key-data">🔑 ${maskKey(key.KeyData)}</span>
@@ -55,25 +41,20 @@ async function loadKeys() {
                     </div>
                 </div>
                 ${key.Comment ? `<div class="comment">💬 ${escapeHtml(key.Comment)}</div>` : ''}
-                <div class="address">📍 ${escapeHtml(flatAddress)}</div>
+                <div class="address">📍 ${escapeHtml(key.Address || 'Адрес не найден')}</div>
             </div>
-        `}).join('');
-        console.log('keys.js: rendering complete');
+        `).join('');
     } catch (err) {
-        console.error('keys.js: loadKeys error:', err);
-        const container = document.getElementById('keys-list');
-        if (container) {
-            container.innerHTML = '<p class="error-message">❌ Ошибка загрузки ключей: ' + err.message + '</p>';
-        }
-        throw err;
+        console.error('Error loading keys:', err);
+        document.getElementById('keys-list').innerHTML = '<p class="error-message">❌ Ошибка загрузки ключей</p>';
     }
 }
 
-async function addKey(flatsList) {
-    flats = flatsList;
+async function addKey(addressesList) {
+    addresses = addressesList;
 
-    if (flats.length === 0) {
-        showMessage('❌ Нет доступных квартир');
+    if (addresses.length === 0) {
+        showMessage('❌ Нет доступных адресов');
         return;
     }
 
@@ -82,10 +63,10 @@ async function addKey(flatsList) {
         <h3>🔑 Добавить ключ домофона</h3>
         <form id="add-key-form">
             <div class="form-group">
-                <label for="flat_id">Квартира:</label>
-                <select id="flat_id" required>
-                    <option value="">Выберите квартиру</option>
-                    ${flats.map(f => `<option value="${f.flat_id}">${escapeHtml(f.address)}</option>`).join('')}
+                <label for="address_id">Адрес:</label>
+                <select id="address_id" required>
+                    <option value="">Выберите адрес</option>
+                    ${addresses.map(a => `<option value="${a.address_id}">${escapeHtml(a.address)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -109,13 +90,12 @@ async function addKey(flatsList) {
     form.onsubmit = async (e) => {
         e.preventDefault();
 
-        // Скрываем предыдущую ошибку
         errorDiv.style.display = 'none';
         errorDiv.textContent = '';
 
-        const flatId = parseInt(document.getElementById('flat_id').value);
-        if (!flatId) {
-            errorDiv.textContent = '❌ Выберите квартиру';
+        const addressId = parseInt(document.getElementById('address_id').value);
+        if (!addressId) {
+            errorDiv.textContent = '❌ Выберите адрес';
             errorDiv.style.display = 'block';
             return;
         }
@@ -127,7 +107,6 @@ async function addKey(flatsList) {
             return;
         }
 
-        // Проверка HEX формата
         const hexRegex = /^[0-9A-Fa-f]+$/;
         if (!hexRegex.test(keyData)) {
             errorDiv.textContent = '❌ Неверный формат ключа. Используйте только цифры 0-9 и буквы A-F';
@@ -142,7 +121,7 @@ async function addKey(flatsList) {
         }
 
         const data = {
-            flat_id: flatId,
+            address_id: addressId,
             key_data: keyData.toUpperCase(),
             comment: document.getElementById('comment').value
         };
@@ -160,7 +139,6 @@ async function addKey(flatsList) {
         } catch (err) {
             errorDiv.textContent = '❌ ' + err.message;
             errorDiv.style.display = 'block';
-            // Подсвечиваем поле с ключом
             const keyInput = document.getElementById('key_data');
             keyInput.style.borderColor = '#ef4444';
             setTimeout(() => {
@@ -197,24 +175,42 @@ async function editKey(id) {
                 <label for="comment">Комментарий:</label>
                 <textarea id="comment" rows="2">${escapeHtml(key.Comment || '')}</textarea>
             </div>
+            <div id="form-error" style="color:#dc2626; font-size:14px; margin-bottom:15px; padding:10px; background:#fee2e2; border-radius:8px; display:none;"></div>
             <button type="submit" class="primary-btn">💾 Сохранить</button>
         </form>
     `;
     document.getElementById('modal').style.display = 'block';
 
-    document.getElementById('edit-key-form').onsubmit = async (e) => {
+    const form = document.getElementById('edit-key-form');
+    const errorDiv = document.getElementById('form-error');
+
+    form.onsubmit = async (e) => {
         e.preventDefault();
+
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
+
         const data = {
             key_data: document.getElementById('key_data').value.toUpperCase(),
             comment: document.getElementById('comment').value
         };
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '⏳ Сохранение...';
+        submitBtn.disabled = true;
+
         try {
-            await api.request(`/api/keys/${key.ID}`, { method: 'PUT', body: JSON.stringify(data) });
+            const result = await api.request(`/api/keys/${key.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
-            showMessage('✅ Изменения сохранены', false);
+            showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
             await loadKeys();
         } catch (err) {
-            showMessage('❌ ' + err.message);
+            errorDiv.textContent = '❌ ' + err.message;
+            errorDiv.style.display = 'block';
+        } finally {
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
         }
     };
 
@@ -226,8 +222,8 @@ async function editKey(id) {
 
 async function deleteKey(id) {
     try {
-        await api.request(`/api/keys/${id}`, { method: 'DELETE' });
-        showMessage('✅ Ключ удалён', false);
+        const result = await api.request(`/api/keys/${id}`, { method: 'DELETE' });
+        showMessage('✅ ' + (result.message || 'Ключ удалён'), false);
         await loadKeys();
     } catch (err) {
         showMessage('❌ ' + err.message);
@@ -240,4 +236,4 @@ function confirmDeleteKey(id) {
     });
 }
 
-export { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setFlats };
+export { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setAddresses };

@@ -3,7 +3,7 @@ import { showMessage } from './auth.js';
 import { showConfirm, closeModal } from './modal.js';
 import { showPhotoGallery } from './gallery.js';
 
-let flats = [];
+let addresses = [];
 let cachedCars = [];
 
 function escapeHtml(text) {
@@ -13,8 +13,8 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function setFlats(flatsData) {
-    flats = flatsData;
+function setAddresses(addressesData) {
+    addresses = addressesData;
 }
 
 async function loadCars() {
@@ -22,12 +22,10 @@ async function loadCars() {
         const cars = await api.request('/api/cars');
         cachedCars = cars;
         const container = document.getElementById('cars-list');
-
         if (cars.length === 0) {
             container.innerHTML = '<p class="empty-message">📭 Нет добавленных автомобилей</p>';
             return;
         }
-
         container.innerHTML = cars.map(car => {
             const expiryDate = new Date(car.ExpiresAt);
             const now = new Date();
@@ -35,7 +33,7 @@ async function loadCars() {
             const showExtend = daysUntilExpiry <= 7 && daysUntilExpiry > 0;
             const mainPhoto = car.Photos?.find(p => p.IsMain) || car.Photos?.[0];
             const photoSrc = mainPhoto ? mainPhoto.PhotoData : '';
-            const flatAddress = flats.find(f => f.flat_id === car.FlatID)?.address || 'Адрес не найден';
+            const address = car.Address || 'Адрес не найден';
 
             // Форматируем дату и время
             const expiryDateStr = expiryDate.toLocaleDateString('ru-RU');
@@ -57,7 +55,7 @@ async function loadCars() {
                     </div>
                 </div>
                 ${car.Comment ? `<div class="comment">💬 ${escapeHtml(car.Comment)}</div>` : ''}
-                <div class="address">📍 ${escapeHtml(flatAddress)}</div>
+                <div class="address">📍 ${escapeHtml(address)}</div>
                 <div class="notify-icons">
                     ${car.AutoOpen ? '<span>🚪 Автооткрытие</span>' : ''}
                     ${car.NotifyOnDetect ? '<span>📡 Обнаружение</span>' : ''}
@@ -130,11 +128,11 @@ async function extendCar(id) {
     }
 }
 
-async function addCar(flatsList) {
-    flats = flatsList;
+async function addCar(addressesList) {
+    addresses = addressesList;
 
-    if (flats.length === 0) {
-        showMessage('❌ Нет доступных квартир');
+    if (addresses.length === 0) {
+        showMessage('❌ Нет доступных адресов');
         return;
     }
 
@@ -143,10 +141,10 @@ async function addCar(flatsList) {
         <h3>🚗 Добавить автомобиль</h3>
         <form id="add-car-form">
             <div class="form-group">
-                <label for="flat_id">Квартира:</label>
-                <select id="flat_id" required>
-                    <option value="">Выберите квартиру</option>
-                    ${flats.map(f => `<option value="${f.flat_id}">${escapeHtml(f.address)}</option>`).join('')}
+                <label for="address_id">Адрес:</label>
+                <select id="address_id" required>
+                    <option value="">Выберите адрес</option>
+                    ${addresses.map(a => `<option value="${a.address_id}">${escapeHtml(a.address)}</option>`).join('')}
                 </select>
             </div>
             <div class="form-group">
@@ -210,9 +208,9 @@ async function addCar(flatsList) {
         errorDiv.style.display = 'none';
         errorDiv.textContent = '';
 
-        const flatId = parseInt(document.getElementById('flat_id').value);
-        if (!flatId) {
-            errorDiv.textContent = '❌ Выберите квартиру';
+        const addressId = parseInt(document.getElementById('address_id').value);
+        if (!addressId) {
+            errorDiv.textContent = '❌ Выберите адрес';
             errorDiv.style.display = 'block';
             return;
         }
@@ -224,8 +222,16 @@ async function addCar(flatsList) {
             return;
         }
 
+        // Простая проверка формата перед отправкой
+        const plateRegex = /^[АВЕКМНОРСТУХA-Z]\d{3}[АВЕКМНОРСТУХA-Z]{2}\d{2,3}$/i;
+        if (!plateRegex.test(plateNumber)) {
+            errorDiv.textContent = '❌ Неверный формат номера. Пример: A123BC159 или О743УХ159';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
         const data = {
-            flat_id: flatId,
+            address_id: addressId,
             plate_number: plateNumber.toUpperCase(),
             comment: document.getElementById('comment').value,
             auto_open: document.getElementById('auto_open').checked,
@@ -246,6 +252,7 @@ async function addCar(flatsList) {
             showMessage('✅ ' + (result.message || 'Автомобиль добавлен'), false);
             await loadCars();
         } catch (err) {
+            console.error('Add car error:', err);
             errorDiv.textContent = '❌ ' + err.message;
             errorDiv.style.display = 'block';
             const plateInput = document.getElementById('plate_number');
@@ -311,13 +318,21 @@ async function editCar(id) {
                     </label>
                 </div>
             </div>
+            <div id="form-error" style="color:#dc2626; font-size:14px; margin-bottom:15px; padding:10px; background:#fee2e2; border-radius:8px; display:none;"></div>
             <button type="submit" class="primary-btn">💾 Сохранить</button>
         </form>
     `;
     document.getElementById('modal').style.display = 'block';
 
-    document.getElementById('edit-car-form').onsubmit = async (e) => {
+    const form = document.getElementById('edit-car-form');
+    const errorDiv = document.getElementById('form-error');
+
+    form.onsubmit = async (e) => {
         e.preventDefault();
+
+        errorDiv.style.display = 'none';
+        errorDiv.textContent = '';
+
         const data = {
             comment: document.getElementById('comment').value,
             auto_open: document.getElementById('auto_open').checked,
@@ -325,13 +340,23 @@ async function editCar(id) {
             notify_on_entry: document.getElementById('notify_entry').checked,
             notify_on_exit: document.getElementById('notify_exit').checked
         };
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = '⏳ Сохранение...';
+        submitBtn.disabled = true;
+
         try {
             const result = await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
             await loadCars();
         } catch (err) {
-            showMessage('❌ ' + err.message);
+            errorDiv.textContent = '❌ ' + err.message;
+            errorDiv.style.display = 'block';
+        } finally {
+            submitBtn.textContent = originalText;
+            submitBtn.disabled = false;
         }
     };
 
@@ -357,4 +382,4 @@ function confirmDeleteCar(id) {
     });
 }
 
-export { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setFlats };
+export { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setAddresses };
