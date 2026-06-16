@@ -1,4 +1,4 @@
-import { getToken, setToken, logout, showMessage, checkWebViewToken } from './auth.js';
+import { getToken, setToken, logout, showMessage, checkWebViewToken, getWebViewAuth } from './auth.js';
 import api from './api.js';
 import { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setAddresses as setCarsAddresses } from './cars.js';
 import { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setAddresses as setKeysAddresses } from './keys.js';
@@ -42,6 +42,15 @@ async function initPortal() {
 
         document.getElementById('auth-screen').classList.remove('active');
         document.getElementById('portal-screen').classList.add('active');
+
+        // Скрываем или показываем кнопку "Выйти" в зависимости от типа авторизации
+        const logoutBtn = document.getElementById('logout-btn');
+        if (getWebViewAuth()) {
+            logoutBtn.style.display = 'none';
+        } else {
+            logoutBtn.style.display = 'block';
+        }
+
         showMessage('Добро пожаловать!', false);
         console.log('app.js: initPortal completed');
     } catch (err) {

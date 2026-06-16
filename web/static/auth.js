@@ -1,4 +1,5 @@
 let token = null;
+let isWebViewAuth = false;
 
 function showMessage(text, isError = true) {
     const msgDiv = document.getElementById('message');
@@ -12,7 +13,9 @@ function showMessage(text, isError = true) {
 
 function logout() {
     token = null;
+    isWebViewAuth = false;
     localStorage.removeItem('token');
+    localStorage.removeItem('isWebViewAuth');
     document.getElementById('auth-screen').classList.add('active');
     document.getElementById('portal-screen').classList.remove('active');
     document.getElementById('phone').value = '';
@@ -23,7 +26,6 @@ function logout() {
     submitBtn.disabled = false;
 }
 
-// Авторизация через WebView токен (из URL параметра)
 async function webViewAuth(actionToken) {
     console.log('WebView auth with token:', actionToken.substring(0, 8) + '...');
     try {
@@ -37,6 +39,7 @@ async function webViewAuth(actionToken) {
 
         token = data.access_token;
         localStorage.setItem('token', token);
+        setWebViewAuth(true);
         return true;
     } catch (err) {
         console.error('WebView auth failed:', err);
@@ -44,14 +47,12 @@ async function webViewAuth(actionToken) {
     }
 }
 
-// Проверка URL на наличие параметра token
 async function checkWebViewToken() {
     const urlParams = new URLSearchParams(window.location.search);
     const actionToken = urlParams.get('token');
 
     if (actionToken && actionToken.length > 0) {
         console.log('Found token in URL, trying WebView auth');
-        // Очищаем URL от токена (чтобы не светился в истории и при обновлении)
         window.history.replaceState({}, document.title, window.location.pathname);
         return await webViewAuth(actionToken);
     }
@@ -65,6 +66,19 @@ function getToken() {
 function setToken(newToken) {
     token = newToken;
     localStorage.setItem('token', token);
+    setWebViewAuth(false);
 }
 
-export { getToken, setToken, logout, showMessage, checkWebViewToken };
+function setWebViewAuth(flag) {
+    isWebViewAuth = flag;
+    localStorage.setItem('isWebViewAuth', JSON.stringify(flag));
+}
+
+function getWebViewAuth() {
+    if (localStorage.getItem('isWebViewAuth') !== null) {
+        return JSON.parse(localStorage.getItem('isWebViewAuth'));
+    }
+    return false;
+}
+
+export { getToken, setToken, logout, showMessage, checkWebViewToken, setWebViewAuth, getWebViewAuth };

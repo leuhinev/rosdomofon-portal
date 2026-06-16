@@ -9,11 +9,12 @@ import (
 type MemoryDB struct {
 	mu                 sync.RWMutex
 	phoneToOwner       map[string]rosdomofon.OwnerInfo
-	addressIDToAddress map[int]string                       // address_id -> строка адреса
-	addressToID        map[rosdomofon.AddressComponents]int // компоненты -> address_id
-	ownerToAddresses   map[int][]int                        // owner_id -> []address_id
+	addressIDToAddress map[int]string
+	addressToID        map[rosdomofon.AddressComponents]int
+	ownerToAddresses   map[int][]int
 	ownerToPhone       map[int]string
 	subscriberToPhone  map[int]string
+	addressToOwner     map[int]int // обратный индекс: address_id -> owner_id
 }
 
 func New() *MemoryDB {
@@ -24,6 +25,7 @@ func New() *MemoryDB {
 		ownerToAddresses:   make(map[int][]int),
 		ownerToPhone:       make(map[int]string),
 		subscriberToPhone:  make(map[int]string),
+		addressToOwner:     make(map[int]int),
 	}
 }
 
@@ -39,18 +41,26 @@ func (db *MemoryDB) Update(
 	db.addressToID = addressToID
 	db.ownerToAddresses = ownerToAddresses
 
-	// Строим обратный индекс address_id -> address_str
+	// address_id -> address_str
 	db.addressIDToAddress = make(map[int]string)
 	for addrComp, id := range addressToID {
 		db.addressIDToAddress[id] = addrComp.AddressStr
 	}
 
-	// Строим обратные индексы для телефонов
+	// ownerToPhone и subscriberToPhone
 	db.ownerToPhone = make(map[int]string)
 	db.subscriberToPhone = make(map[int]string)
 	for phone, info := range phoneToOwner {
 		db.ownerToPhone[info.OwnerID] = phone
 		db.subscriberToPhone[info.OwnerID] = phone
+	}
+
+	// addressToOwner: построить обратный индекс
+	db.addressToOwner = make(map[int]int)
+	for ownerID, addresses := range ownerToAddresses {
+		for _, addrID := range addresses {
+			db.addressToOwner[addrID] = ownerID
+		}
 	}
 
 	slog.Debug("memorydb updated",
@@ -59,6 +69,7 @@ func (db *MemoryDB) Update(
 		"owners", len(ownerToAddresses))
 }
 
+// GetOwnerByPhone возвращает owner_id и список address_id по номеру телефона
 func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -69,6 +80,7 @@ func (db *MemoryDB) GetOwnerByPhone(phone string) (int, []int, bool) {
 	return info.OwnerID, info.AddressIDs, true
 }
 
+// GetPhoneByOwnerID возвращает телефон по owner_id
 func (db *MemoryDB) GetPhoneByOwnerID(ownerID int) (string, bool) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -76,6 +88,7 @@ func (db *MemoryDB) GetPhoneByOwnerID(ownerID int) (string, bool) {
 	return phone, ok
 }
 
+// GetOwnerBySubscriberID возвращает телефон и список address_id по subscriber_id
 func (db *MemoryDB) GetOwnerBySubscriberID(subscriberID int) (string, []int, bool) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -93,18 +106,21 @@ func (db *MemoryDB) GetOwnerBySubscriberID(subscriberID int) (string, []int, boo
 	return phone, info.AddressIDs, true
 }
 
+// GetAddressesByOwner возвращает список address_id для владельца
 func (db *MemoryDB) GetAddressesByOwner(ownerID int) []int {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	return db.ownerToAddresses[ownerID]
 }
 
+// GetAddressByAddressID возвращает строку адреса по address_id
 func (db *MemoryDB) GetAddressByAddressID(addressID int) string {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	return db.addressIDToAddress[addressID]
 }
 
+// GetAddressIDByComponents возвращает address_id по компонентам адреса
 func (db *MemoryDB) GetAddressIDByComponents(addrComp rosdomofon.AddressComponents) (int, bool) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -112,6 +128,15 @@ func (db *MemoryDB) GetAddressIDByComponents(addrComp rosdomofon.AddressComponen
 	return id, ok
 }
 
+// GetOwnerByAddressID возвращает owner_id по address_id
+func (db *MemoryDB) GetOwnerByAddressID(addressID int) (int, bool) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	ownerID, ok := db.addressToOwner[addressID]
+	return ownerID, ok
+}
+
+// AddressBelongsToOwner проверяет, принадлежит ли address_id владельцу
 func (db *MemoryDB) AddressBelongsToOwner(ownerID, addressID int) bool {
 	db.mu.RLock()
 	defer db.mu.RUnlock()

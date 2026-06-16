@@ -285,7 +285,6 @@ func (c *Client) getEntrancesWithServices() ([]EntranceItem, error) {
 		return nil, err
 	}
 
-	// Сохраняем информацию о сервисах
 	c.mu.Lock()
 	for _, item := range response.Content {
 		for _, svc := range item.Services {
@@ -349,6 +348,7 @@ func (c *Client) GetFilteredServiceIDs() ([]int, error) {
 	return ids, nil
 }
 
+// SendPush - отправка кода подтверждения (существующий метод)
 func (c *Client) SendPush(phone int64, code string) error {
 	slog.Debug("sending push notification", "phone", phone, "code", code)
 
@@ -419,5 +419,79 @@ func (c *Client) SendPush(phone int64, code string) error {
 	}
 
 	slog.Info("push sent successfully", "phone", phone)
+	return nil
+}
+
+// SendNotification - отправка произвольного уведомления через push
+func (c *Client) SendNotification(phone int64, message string) error {
+	slog.Debug("sending notification", "phone", phone, "message", message)
+
+	token, err := c.GetToken()
+	if err != nil {
+		slog.Error("failed to get token for notification", "error", err)
+		return err
+	}
+
+	phoneStr := fmt.Sprintf("+%d", phone)
+
+	request := MessageRequest{
+		ToAbonents: []MessageAbonent{
+			{Phone: phoneStr},
+		},
+		Channel:        "notification",
+		Message:        message,
+		DeliveryMethod: "push",
+	}
+
+	body, err := json.Marshal(request)
+	if err != nil {
+		slog.Error("failed to marshal notification request", "error", err)
+		return err
+	}
+
+	slog.Info("notification request body", "body", string(body))
+
+	req, err := http.NewRequest("POST", "https://rdba.rosdomofon.com/abonents-service/api/v1/messages", bytes.NewBuffer(body))
+	if err != nil {
+		slog.Error("failed to create notification request", "error", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("failed to send notification request", "error", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read notification response", "error", err)
+		return err
+	}
+
+	slog.Info("notification response", "status", resp.StatusCode, "body", string(respBody))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("notification send failed", "status", resp.StatusCode)
+		return fmt.Errorf("notification send failed: %d", resp.StatusCode)
+	}
+
+	var responses []map[string]interface{}
+	if err := json.Unmarshal(respBody, &responses); err == nil {
+		for i, r := range responses {
+			if success, ok := r["success"]; ok && success == false {
+				slog.Error("notification delivery failed", "index", i, "result", r["result"])
+				return fmt.Errorf("notification delivery failed: %v", r["result"])
+			}
+			if success, ok := r["success"]; ok && success == true {
+				slog.Info("notification delivered successfully", "index", i)
+			}
+		}
+	}
+
+	slog.Info("notification sent successfully", "phone", phone)
 	return nil
 }

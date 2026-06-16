@@ -9,9 +9,10 @@ type Config struct {
 	MySQL      MySQLConfig       `mapstructure:"mysql"`
 	Memcached  MemcachedConfig   `mapstructure:"memcached"`
 	Rosdomofon RosdomofonConfig  `mapstructure:"rosdomofon"`
+	MQTT       MQTTConfig        `mapstructure:"mqtt"`
 	Sections   SectionsConfig    `mapstructure:"sections"`
 	Doors      map[string]Door   `mapstructure:"doors"`
-	Auth       map[string]string `mapstructure:"auth"` // basic auth логин:пароль
+	Auth       map[string]string `mapstructure:"auth"`
 	JWTSecret  string            `mapstructure:"jwt_secret"`
 	LogLevel   string            `mapstructure:"log_level"`
 }
@@ -43,6 +44,15 @@ type RosdomofonConfig struct {
 	ServiceTypes        []string `mapstructure:"service_types"`
 }
 
+type MQTTConfig struct {
+	Broker   string `mapstructure:"broker"` // e.g. "tcp://localhost:1883"
+	ClientID string `mapstructure:"client_id"`
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+	Topic    string `mapstructure:"topic"` // топик для подписки, можно с wildcard
+	QOS      byte   `mapstructure:"qos"`   // 0, 1, 2
+}
+
 type SectionsConfig struct {
 	Enabled []string `mapstructure:"enabled"`
 }
@@ -56,6 +66,8 @@ type Door struct {
 	Body        string `mapstructure:"body,omitempty"`
 	ContentType string `mapstructure:"content_type,omitempty"`
 	InsecureTLS bool   `mapstructure:"insecure_tls,omitempty"`
+	MqttTopic   string `mapstructure:"mqtt_topic"` // топик, по которому слушаем события для этой двери
+	FreeOut     bool   `mapstructure:"free_out"`   // свободный выезд: открывать любому номеру при детекте
 }
 
 func Load() (*Config, error) {
@@ -69,6 +81,7 @@ func Load() (*Config, error) {
 	viper.SetDefault("sections.enabled", []string{"cars", "keys"})
 	viper.SetDefault("rosdomofon.sync_interval_minutes", 60)
 	viper.SetDefault("rosdomofon.service_types", []string{"VideoSurveillance", "Gate", "HardwareIntercom", "SoftwareIntercom"})
+	viper.SetDefault("mqtt.qos", 1)
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, err

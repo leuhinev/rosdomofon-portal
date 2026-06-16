@@ -36,7 +36,6 @@ func (s *Storage) GetOrCreatePlateNumber(plateNumber string) (int, error) {
 	return plate.ID, nil
 }
 
-// GetOrCreateAddress - создает запись адреса, если её нет, или возвращает существующую
 func (s *Storage) GetOrCreateAddress(streetID, houseID, entranceID, flatNumber int, addressStr string) (int, error) {
 	var addr Address
 	result := s.DB.Where("street_id = ? AND house_id = ? AND entrance_id = ? AND flat_number = ?",
@@ -124,6 +123,117 @@ func (s *Storage) GetCarsByAddressIDs(addressIDs []int) ([]Car, error) {
 			AddressID:      dbCar.AddressID,
 			PlateID:        dbCar.PlateID,
 			PlateNumber:    plate.PlateNumber,
+			Comment:        dbCar.Comment,
+			AutoOpen:       dbCar.AutoOpen,
+			NotifyOnDetect: dbCar.NotifyOnDetect,
+			NotifyOnEntry:  dbCar.NotifyOnEntry,
+			NotifyOnExit:   dbCar.NotifyOnExit,
+			ExpiresAt:      time.Unix(dbCar.ExpiresAt, 0),
+			CreatedAt:      time.Unix(dbCar.CreatedAt, 0),
+			UpdatedAt:      time.Unix(dbCar.UpdatedAt, 0),
+			Photos:         photos,
+		}
+	}
+	return cars, nil
+}
+
+// GetCarsByPlateNumber возвращает только активные записи автомобилей с указанным номером (срок действия не истек)
+func (s *Storage) GetCarsByPlateNumber(plateNumber string) ([]Car, error) {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return []Car{}, nil
+		}
+		return nil, result.Error
+	}
+
+	now := time.Now().Unix()
+	var dbCars []UserCar
+	result = s.DB.Where("plate_id = ? AND expires_at > ?", plate.ID, now).Find(&dbCars)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	cars := make([]Car, len(dbCars))
+	for i, dbCar := range dbCars {
+		var p PlateNumber
+		s.DB.First(&p, dbCar.PlateID)
+
+		var dbPhotos []CarPhotoDB
+		s.DB.Where("plate_id = ?", p.ID).Order("is_main DESC").Find(&dbPhotos)
+
+		photos := make([]CarPhotoDB, len(dbPhotos))
+		for j, ph := range dbPhotos {
+			photos[j] = CarPhotoDB{
+				ID:        ph.ID,
+				PlateID:   ph.PlateID,
+				PhotoData: ph.PhotoData,
+				IsMain:    ph.IsMain,
+				CreatedAt: ph.CreatedAt,
+			}
+		}
+
+		cars[i] = Car{
+			ID:             dbCar.ID,
+			AddressID:      dbCar.AddressID,
+			PlateID:        dbCar.PlateID,
+			PlateNumber:    p.PlateNumber,
+			Comment:        dbCar.Comment,
+			AutoOpen:       dbCar.AutoOpen,
+			NotifyOnDetect: dbCar.NotifyOnDetect,
+			NotifyOnEntry:  dbCar.NotifyOnEntry,
+			NotifyOnExit:   dbCar.NotifyOnExit,
+			ExpiresAt:      time.Unix(dbCar.ExpiresAt, 0),
+			CreatedAt:      time.Unix(dbCar.CreatedAt, 0),
+			UpdatedAt:      time.Unix(dbCar.UpdatedAt, 0),
+			Photos:         photos,
+		}
+	}
+	return cars, nil
+}
+
+// GetAllCarsByPlateNumber возвращает все записи (включая истекшие) - для административных целей
+func (s *Storage) GetAllCarsByPlateNumber(plateNumber string) ([]Car, error) {
+	var plate PlateNumber
+	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
+	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return []Car{}, nil
+		}
+		return nil, result.Error
+	}
+
+	var dbCars []UserCar
+	result = s.DB.Where("plate_id = ?", plate.ID).Find(&dbCars)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	cars := make([]Car, len(dbCars))
+	for i, dbCar := range dbCars {
+		var p PlateNumber
+		s.DB.First(&p, dbCar.PlateID)
+
+		var dbPhotos []CarPhotoDB
+		s.DB.Where("plate_id = ?", p.ID).Order("is_main DESC").Find(&dbPhotos)
+
+		photos := make([]CarPhotoDB, len(dbPhotos))
+		for j, ph := range dbPhotos {
+			photos[j] = CarPhotoDB{
+				ID:        ph.ID,
+				PlateID:   ph.PlateID,
+				PhotoData: ph.PhotoData,
+				IsMain:    ph.IsMain,
+				CreatedAt: ph.CreatedAt,
+			}
+		}
+
+		cars[i] = Car{
+			ID:             dbCar.ID,
+			AddressID:      dbCar.AddressID,
+			PlateID:        dbCar.PlateID,
+			PlateNumber:    p.PlateNumber,
 			Comment:        dbCar.Comment,
 			AutoOpen:       dbCar.AutoOpen,
 			NotifyOnDetect: dbCar.NotifyOnDetect,

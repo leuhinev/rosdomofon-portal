@@ -19,6 +19,7 @@ import (
 	"rosdomofon-portal/internal/logger"
 	"rosdomofon-portal/internal/memorydb"
 	"rosdomofon-portal/internal/middleware"
+	"rosdomofon-portal/internal/mqtt"
 	"rosdomofon-portal/internal/rosdomofon"
 	"rosdomofon-portal/internal/storage"
 )
@@ -114,6 +115,21 @@ func main() {
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// Инициализация MQTT клиента
+	mqttClient := mqtt.NewMQTTClient(cfg.MQTT, db, memDB, cfg.Doors, rosClient)
+	go func() {
+		for {
+			if err := mqttClient.Connect(); err != nil {
+				slog.Error("MQTT connection failed, retrying in 10s", "error", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
+		}
+		// Ждём, пока клиент не отключится (блокируем горутину)
+		select {}
+	}()
 
 	// Запуск синхронизации при старте
 	go func() {
