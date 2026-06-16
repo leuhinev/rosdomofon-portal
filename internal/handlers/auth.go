@@ -9,7 +9,6 @@ import (
 	"rosdomofon-portal/internal/memorydb"
 	"rosdomofon-portal/internal/rosdomofon"
 	"strconv"
-	"time"
 )
 
 type AuthHandler struct {
@@ -28,6 +27,7 @@ func NewAuthHandler(jm *auth.JWTManager, cm *auth.CodeManager, rc *rosdomofon.Cl
 	}
 }
 
+// SendCode - запрос кода для обычной авторизации (браузер)
 func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
@@ -100,6 +100,7 @@ func (h *AuthHandler) SendCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "code sent"})
 }
 
+// VerifyCode - проверка кода для обычной авторизации (браузер)
 func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Phone string `json:"phone"`
@@ -149,68 +150,49 @@ func (h *AuthHandler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"access_token": token})
 }
 
-// RefreshToken - обновление токена с проверкой прав в РосДомофоне
-func (h *AuthHandler) RefreshToken(w http.ResponseWriter, r *http.Request) {
+// WebViewAuth - авторизация через токен из WebView (из URL параметра)
+func (h *AuthHandler) WebViewAuth(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Token string `json:"token"`
+		ActionToken string `json:"action_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		slog.Error("failed to decode refresh request", "error", err)
+		slog.Error("failed to decode request", "error", err)
 		http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
 		return
 	}
 
-	if req.Token == "" {
-		http.Error(w, `{"error":"token required"}`, http.StatusBadRequest)
+	if req.ActionToken == "" {
+		slog.Error("action_token is empty")
+		http.Error(w, `{"error":"action_token required"}`, http.StatusBadRequest)
 		return
 	}
 
-	// Проверяем старый токен
-	claims, err := h.jwtManager.Verify(req.Token)
+	// Проверяем токен в API РосДомофона
+	tokenInfo, err := h.rosClient.VerifyActionToken(req.ActionToken)
 	if err != nil {
-		slog.Error("failed to verify token", "error", err)
+		slog.Error("failed to verify action token", "error", err)
 		http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 		return
 	}
 
-	// Проверяем, что токен не истек
-	if claims.ExpiresAt.Time.Before(time.Now()) {
-		slog.Error("token expired")
-		http.Error(w, `{"error":"token expired"}`, http.StatusUnauthorized)
-		return
-	}
-
-	// Нужно найти телефон по owner_id для проверки в РосДомофоне
-	// Для этого нужно добавить обратный индекс в memorydb
-	phone, ok := h.memoryDB.GetPhoneByOwnerID(claims.OwnerID)
+	// По subscriber_id находим телефон и flat_ids
+	phone, flatIDs, ok := h.memoryDB.GetOwnerBySubscriberID(tokenInfo.SubscriberId)
 	if !ok {
-		slog.Error("owner not found in Rosdomofon", "owner_id", claims.OwnerID)
-		http.Error(w, `{"error":"user not found in Rosdomofon"}`, http.StatusUnauthorized)
+		slog.Error("subscriber not found", "subscriber_id", tokenInfo.SubscriberId)
+		http.Error(w, `{"error":"subscriber not found in system"}`, http.StatusNotFound)
 		return
 	}
 
-	// Проверяем, что пользователь всё ещё существует в РосДомофоне
-	// и получаем актуальный список flat_ids
-	ownerID, flatIDs, ok := h.memoryDB.GetOwnerByPhone(phone)
-	if !ok {
-		slog.Error("user no longer exists in Rosdomofon", "phone", phone)
-		http.Error(w, `{"error":"access revoked"}`, http.StatusUnauthorized)
-		return
-	}
+	ownerID, _, _ := h.memoryDB.GetOwnerByPhone(phone)
 
-	// Проверяем, что owner_id не изменился
-	if ownerID != claims.OwnerID {
-		slog.Warn("owner_id mismatch", "old", claims.OwnerID, "new", ownerID)
-	}
-
-	// Генерируем новый токен с актуальными flat_ids
-	newToken, err := h.jwtManager.Generate(ownerID, flatIDs)
+	// Генерируем наш JWT
+	jwtToken, err := h.jwtManager.Generate(ownerID, flatIDs)
 	if err != nil {
-		slog.Error("failed to generate new token", "error", err)
+		slog.Error("failed to generate token", "error", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 
-	slog.Info("token refreshed successfully", "owner_id", ownerID, "flats_count", len(flatIDs))
-	json.NewEncoder(w).Encode(map[string]string{"access_token": newToken})
+	slog.Info("webview auth successful", "subscriber_id", tokenInfo.SubscriberId, "phone", phone)
+	json.NewEncoder(w).Encode(map[string]string{"access_token": jwtToken})
 }

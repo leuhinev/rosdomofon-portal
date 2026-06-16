@@ -58,7 +58,8 @@ func main() {
 	// Публичные endpoints (без авторизации)
 	mux.HandleFunc("POST /api/auth/send-code", authHandler.SendCode)
 	mux.HandleFunc("POST /api/auth/verify", authHandler.VerifyCode)
-	mux.HandleFunc("POST /api/auth/refresh", authHandler.RefreshToken)
+	//mux.HandleFunc("POST /api/auth/refresh", authHandler.RefreshToken)
+	mux.HandleFunc("POST /api/auth/webview", authHandler.WebViewAuth)
 
 	// Защищенные endpoints (с авторизацией)
 	mux.Handle("GET /api/user/flats", middleware.Auth(jwtManager)(http.HandlerFunc(flatsHandler.GetUserFlats)))

@@ -23,53 +23,39 @@ function logout() {
     submitBtn.disabled = false;
 }
 
-async function refreshTokenIfNeeded() {
-    const savedToken = localStorage.getItem('token');
-    if (!savedToken) return false;
-
+// Авторизация через WebView токен (из URL параметра)
+async function webViewAuth(actionToken) {
+    console.log('WebView auth with token:', actionToken.substring(0, 8) + '...');
     try {
-        // Декодируем токен, чтобы проверить срок действия
-        const payload = JSON.parse(atob(savedToken.split('.')[1]));
-        const expTime = payload.exp * 1000;
-        const now = Date.now();
-
-        console.log('Token check:', {
-            expDate: new Date(expTime).toLocaleString(),
-            now: new Date(now).toLocaleString(),
-            expired: expTime < now
-        });
-
-        // Если токен истек - нужно перелогиниться
-        if (expTime < now) {
-            console.log('Token expired, need login');
-            logout();
-            return false;
-        }
-
-        // Всегда обновляем токен при загрузке (продлеваем сессию)
-        console.log('Refreshing token...');
-        const response = await fetch('/api/auth/refresh', {
+        const response = await fetch('/api/auth/webview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: savedToken })
+            body: JSON.stringify({ action_token: actionToken })
         });
-
         const data = await response.json();
-        if (response.ok) {
-            token = data.access_token;
-            localStorage.setItem('token', token);
-            console.log('Token refreshed successfully, new expiry: +60 days');
-            return true;
-        } else {
-            console.log('Token refresh failed, need login');
-            logout();
-            return false;
-        }
+        if (!response.ok) throw new Error(data.error);
+
+        token = data.access_token;
+        localStorage.setItem('token', token);
+        return true;
     } catch (err) {
-        console.error('Refresh failed:', err);
-        logout();
+        console.error('WebView auth failed:', err);
         return false;
     }
+}
+
+// Проверка URL на наличие параметра token
+async function checkWebViewToken() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const actionToken = urlParams.get('token');
+
+    if (actionToken && actionToken.length > 0) {
+        console.log('Found token in URL, trying WebView auth');
+        // Очищаем URL от токена (чтобы не светился в истории и при обновлении)
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return await webViewAuth(actionToken);
+    }
+    return false;
 }
 
 function getToken() {
@@ -81,4 +67,4 @@ function setToken(newToken) {
     localStorage.setItem('token', token);
 }
 
-export { getToken, setToken, logout, showMessage, refreshTokenIfNeeded };
+export { getToken, setToken, logout, showMessage, checkWebViewToken };

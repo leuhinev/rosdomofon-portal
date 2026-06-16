@@ -1,4 +1,6 @@
 .kitchen
+bin/portal
+bin/.*
 ./bin/.*
 .idea
 *.swp

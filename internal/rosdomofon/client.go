@@ -95,6 +95,54 @@ func (c *Client) refreshToken() (string, error) {
 	return c.accessToken, nil
 }
 
+// VerifyActionToken - проверка токена из WebView
+func (c *Client) VerifyActionToken(actionToken string) (*ActionTokenInfo, error) {
+	slog.Info("verifying action token", "token_preview", actionToken[:8]+"...")
+
+	machineToken, err := c.GetToken()
+	if err != nil {
+		slog.Error("failed to get machine token", "error", err)
+		return nil, err
+	}
+
+	url := fmt.Sprintf("https://rdba.rosdomofon.com/abonents-service/api/v1/action_token/verify/%s", actionToken)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		slog.Error("failed to create verify request", "error", err)
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+machineToken)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		slog.Error("failed to send verify request", "error", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		slog.Error("failed to read verify response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("action token verify response", "status", resp.StatusCode, "body", string(body))
+
+	if resp.StatusCode != http.StatusOK {
+		slog.Error("action token verification failed", "status", resp.StatusCode)
+		return nil, fmt.Errorf("action token verification failed: %d", resp.StatusCode)
+	}
+
+	var info ActionTokenInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		slog.Error("failed to parse verify response", "error", err)
+		return nil, err
+	}
+
+	slog.Info("action token verified", "subscriber_id", info.SubscriberId)
+	return &info, nil
+}
+
 func (c *Client) SendPush(phone int64, code string) error {
 	slog.Debug("sending push notification", "phone", phone, "code", code)
 
@@ -104,10 +152,8 @@ func (c *Client) SendPush(phone int64, code string) error {
 		return err
 	}
 
-	// Форматируем телефон как строку с +7
 	phoneStr := fmt.Sprintf("+%d", phone)
 
-	// Отправляем ОДИН объект, а не массив
 	request := MessageRequest{
 		ToAbonents: []MessageAbonent{
 			{Phone: phoneStr},
@@ -117,7 +163,7 @@ func (c *Client) SendPush(phone int64, code string) error {
 		DeliveryMethod: "push",
 	}
 
-	body, err := json.Marshal(request) // Убрали массив, маршалим напрямую объект
+	body, err := json.Marshal(request)
 	if err != nil {
 		slog.Error("failed to marshal push request", "error", err)
 		return err
@@ -153,28 +199,15 @@ func (c *Client) SendPush(phone int64, code string) error {
 		return fmt.Errorf("push send failed: %d", resp.StatusCode)
 	}
 
-	// Парсим ответ (может быть объект или массив)
-	var response map[string]interface{}
-	if err := json.Unmarshal(respBody, &response); err == nil {
-		if success, ok := response["success"]; ok && success == false {
-			slog.Error("push delivery failed", "result", response["result"])
-			return fmt.Errorf("push delivery failed: %v", response["result"])
-		}
-		if success, ok := response["success"]; ok && success == true {
-			slog.Info("push delivered successfully")
-		}
-	} else {
-		// Если ответ - массив
-		var responses []map[string]interface{}
-		if err := json.Unmarshal(respBody, &responses); err == nil {
-			for i, r := range responses {
-				if success, ok := r["success"]; ok && success == false {
-					slog.Error("push delivery failed", "index", i, "result", r["result"])
-					return fmt.Errorf("push delivery failed: %v", r["result"])
-				}
-				if success, ok := r["success"]; ok && success == true {
-					slog.Info("push delivered successfully", "index", i)
-				}
+	var responses []map[string]interface{}
+	if err := json.Unmarshal(respBody, &responses); err == nil {
+		for i, r := range responses {
+			if success, ok := r["success"]; ok && success == false {
+				slog.Error("push delivery failed", "index", i, "result", r["result"])
+				return fmt.Errorf("push delivery failed: %v", r["result"])
+			}
+			if success, ok := r["success"]; ok && success == true {
+				slog.Info("push delivered successfully", "index", i)
 			}
 		}
 	}

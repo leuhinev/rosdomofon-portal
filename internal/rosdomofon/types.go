@@ -57,7 +57,7 @@ type Delegation struct {
 }
 
 type Abonent struct {
-	ID    int   `json:"id,omitempty"` // omitempty позволяет не отправлять поле если оно пустое
+	ID    int   `json:"id,omitempty"`
 	Phone int64 `json:"phone"`
 }
 
@@ -86,5 +86,20 @@ type MessageRequest struct {
 }
 
 type MessageAbonent struct {
-	Phone string `json:"phone"` // Телефон как строка, а не число
+	Phone string `json:"phone"`
+}
+
+type MessageResponse struct {
+	ID      int64  `json:"id"`
+	Success bool   `json:"success"`
+	Result  string `json:"result"`
+}
+
+// ActionTokenInfo - ответ от API при проверке токена из WebView
+type ActionTokenInfo struct {
+	ID           int    `json:"id"`
+	Token        string `json:"token"`
+	UseCount     int    `json:"useCount"`
+	ExpiryDate   int64  `json:"expiryDate"`
+	SubscriberId int    `json:"subscriberId"`
 }

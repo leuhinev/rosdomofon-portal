@@ -1,4 +1,4 @@
-import { getToken, setToken, logout, refreshTokenIfNeeded, showMessage } from './auth.js';
+import { getToken, setToken, logout, showMessage, checkWebViewToken } from './auth.js';
 import api from './api.js';
 import { loadCars, addCar, editCar, deleteCar, confirmDeleteCar, extendCar, setFlats as setCarsFlats } from './cars.js';
 import { loadKeys, addKey, editKey, deleteKey, confirmDeleteKey, setFlats as setKeysFlats } from './keys.js';
@@ -20,7 +20,7 @@ function hideLoading() {
 async function loadFlats() {
     console.log('app.js: loading flats...');
     const data = await api.request('/api/user/flats');
-    console.log('app.js: flats loaded:', data);
+    console.log('app.js: flats loaded:', data.length, 'flats');
     flats = data;
     setCarsFlats(flats);
     setKeysFlats(flats);
@@ -37,12 +37,9 @@ async function initPortal() {
         }
 
         await loadFlats();
-        console.log('app.js: calling loadCars');
         await loadCars();
-        console.log('app.js: calling loadKeys');
         await loadKeys();
 
-        console.log('app.js: switching screens');
         document.getElementById('auth-screen').classList.remove('active');
         document.getElementById('portal-screen').classList.add('active');
         showMessage('Добро пожаловать!', false);
@@ -58,14 +55,24 @@ async function initPortal() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     console.log('app.js: DOM loaded');
-    const isLoggedIn = await refreshTokenIfNeeded();
 
-    if (isLoggedIn) {
-        console.log('app.js: user logged in, initializing portal');
+    // Сначала проверяем WebView токен в URL
+    const webViewSuccess = await checkWebViewToken();
+
+    if (webViewSuccess) {
+        console.log('WebView auth successful, initializing portal');
         await initPortal();
     } else {
-        console.log('app.js: user not logged in');
-        hideLoading();
+        // Проверяем обычный токен в localStorage
+        const savedToken = localStorage.getItem('token');
+        if (savedToken) {
+            setToken(savedToken);
+            console.log('Found saved token, initializing portal');
+            await initPortal();
+        } else {
+            console.log('No token found, showing auth screen');
+            hideLoading();
+        }
     }
 
     const phoneInput = document.getElementById('phone');
