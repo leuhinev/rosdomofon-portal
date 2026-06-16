@@ -53,6 +53,7 @@ func main() {
 	addressesHandler := handlers.NewAddressesHandler(memDB)
 	carsHandler := handlers.NewCarsHandler(db, memDB)
 	keysHandler := handlers.NewKeysHandler(db, memDB)
+	doorsHandler := handlers.NewDoorsHandler(cfg)
 
 	mux := http.NewServeMux()
 
@@ -61,7 +62,7 @@ func main() {
 	mux.HandleFunc("POST /api/auth/verify", authHandler.VerifyCode)
 	mux.HandleFunc("POST /api/auth/webview", authHandler.WebViewAuth)
 
-	// Защищенные endpoints
+	// Защищенные endpoints (JWT)
 	mux.Handle("GET /api/user/addresses", middleware.Auth(jwtManager)(http.HandlerFunc(addressesHandler.GetUserAddresses)))
 	mux.Handle("GET /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.GetCars)))
 	mux.Handle("POST /api/cars", middleware.Auth(jwtManager)(http.HandlerFunc(carsHandler.CreateCar)))
@@ -72,6 +73,9 @@ func main() {
 	mux.Handle("POST /api/keys", middleware.Auth(jwtManager)(http.HandlerFunc(keysHandler.CreateKey)))
 	mux.Handle("PUT /api/keys/", middleware.Auth(jwtManager)(http.HandlerFunc(keysHandler.UpdateKey)))
 	mux.Handle("DELETE /api/keys/", middleware.Auth(jwtManager)(http.HandlerFunc(keysHandler.DeleteKey)))
+
+	// Старый обработчик для дверей (Basic Auth, без JWT)
+	mux.HandleFunc("/door/", doorsHandler.OpenDoorLegacy)
 
 	webContent, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -125,7 +129,6 @@ func main() {
 			"unique_addresses", len(data.AddressToID),
 			"unique_owners", len(data.OwnerToAddresses))
 
-		// Создаем реальные ID адресов в БД и строим маппинг tempID -> realID
 		tempToReal := make(map[int]int)
 		realAddressToID := make(map[rosdomofon.AddressComponents]int)
 
@@ -146,7 +149,6 @@ func main() {
 			slog.Debug("address mapped", "temp_id", tempID, "real_id", realID, "address", addrComp.AddressStr)
 		}
 
-		// Обновляем PhoneToOwner с реальными ID
 		newPhoneToOwner := make(map[string]rosdomofon.OwnerInfo)
 		for phone, info := range data.PhoneToOwner {
 			newInfo := rosdomofon.OwnerInfo{
@@ -162,7 +164,6 @@ func main() {
 			newPhoneToOwner[phone] = newInfo
 		}
 
-		// Обновляем OwnerToAddresses с реальными ID
 		newOwnerToAddresses := make(map[int][]int)
 		for ownerID, tempIDs := range data.OwnerToAddresses {
 			var realIDs []int
@@ -178,7 +179,6 @@ func main() {
 			}
 		}
 
-		// Обновляем память
 		memDB.Update(newPhoneToOwner, realAddressToID, newOwnerToAddresses)
 
 		slog.Info("initial sync completed",
@@ -201,7 +201,6 @@ func main() {
 					continue
 				}
 
-				// Аналогичная логика обновления с реальными ID
 				tempToReal := make(map[int]int)
 				realAddressToID := make(map[rosdomofon.AddressComponents]int)
 

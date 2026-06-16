@@ -5,13 +5,15 @@ import (
 )
 
 type Config struct {
-	Server     ServerConfig     `mapstructure:"server"`
-	MySQL      MySQLConfig      `mapstructure:"mysql"`
-	Memcached  MemcachedConfig  `mapstructure:"memcached"`
-	Rosdomofon RosdomofonConfig `mapstructure:"rosdomofon"`
-	Sections   SectionsConfig   `mapstructure:"sections"`
-	JWTSecret  string           `mapstructure:"jwt_secret"`
-	LogLevel   string           `mapstructure:"log_level"`
+	Server     ServerConfig      `mapstructure:"server"`
+	MySQL      MySQLConfig       `mapstructure:"mysql"`
+	Memcached  MemcachedConfig   `mapstructure:"memcached"`
+	Rosdomofon RosdomofonConfig  `mapstructure:"rosdomofon"`
+	Sections   SectionsConfig    `mapstructure:"sections"`
+	Doors      map[string]Door   `mapstructure:"doors"`
+	Auth       map[string]string `mapstructure:"auth"` // basic auth логин:пароль
+	JWTSecret  string            `mapstructure:"jwt_secret"`
+	LogLevel   string            `mapstructure:"log_level"`
 }
 
 type ServerConfig struct {
@@ -43,6 +45,17 @@ type RosdomofonConfig struct {
 
 type SectionsConfig struct {
 	Enabled []string `mapstructure:"enabled"`
+}
+
+type Door struct {
+	URL         string `mapstructure:"url"`
+	Method      string `mapstructure:"method"`
+	AuthType    string `mapstructure:"auth_type"`
+	Username    string `mapstructure:"username,omitempty"`
+	Password    string `mapstructure:"password,omitempty"`
+	Body        string `mapstructure:"body,omitempty"`
+	ContentType string `mapstructure:"content_type,omitempty"`
+	InsecureTLS bool   `mapstructure:"insecure_tls,omitempty"`
 }
 
 func Load() (*Config, error) {

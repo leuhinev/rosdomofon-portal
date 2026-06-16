@@ -1,16 +1,3 @@
-server:
-  port: 8080
-
-mysql:
-  host: localhost
-  port: 3306
-  user: root
-  password: password
-  database: portal
-
-memcached:
-  address: localhost:11211
-
 rosdomofon:
   email: "machine@example.com"
   password: "your-password"
@@ -21,6 +8,24 @@ rosdomofon:
     - HouseChat
     - HardwareIntercom
     - SoftwareIntercom
+# Basic auth для эндпоинта открытия дверей
+auth:
+  rosdomofon: "pass"   # логин: rosdomofon, пароль: pass
+
+doors:
+  "1":
+    url: "http://192.168.1.62/relay_cgi.cgi?type=2&relay=12&on=1&time=1&pwd=&;"
+    method: "GET"
+    auth_type: "none"
+    insecure_tls: false
+  "2":
+    url: "http://192.168.1.230/cgi-bin/accessControl.cgi?action=openDoor&channel=1&Type=Remote"
+    method: "GET"
+    auth_type: "digest"
+    username: "admin"
+    password: "pass"
+    insecure_tls: false
+
 sections:
   enabled:
     - cars
