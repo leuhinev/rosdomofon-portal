@@ -30,7 +30,7 @@ async function loadCars() {
             const expiryDate = new Date(car.ExpiresAt);
             const now = new Date();
             const daysUntilExpiry = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
-            const showExtend = daysUntilExpiry <= 7 && daysUntilExpiry > 0;
+            const showExtend = daysUntilExpiry <= 7;
             const mainPhoto = car.Photos?.find(p => p.IsMain) || car.Photos?.[0];
             const photoSrc = mainPhoto ? mainPhoto.PhotoData : '';
             // Используем car.address (с маленькой буквы, как приходит с сервера)

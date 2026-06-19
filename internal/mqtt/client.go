@@ -98,7 +98,7 @@ func (m *MQTTClient) onConnectionLost(client mqtt.Client, err error) {
 }
 
 func (m *MQTTClient) messageHandler(client mqtt.Client, msg mqtt.Message) {
-	slog.Debug("Received MQTT message", "topic", msg.Topic(), "size_bytes", len(msg.Payload()))
+	//slog.Debug("Received MQTT message", "topic", msg.Topic(), "size_bytes", len(msg.Payload()))
 	go m.processMessage(msg.Topic(), msg.Payload())
 }
 
@@ -109,8 +109,8 @@ func (m *MQTTClient) processMessage(topic string, payload []byte) {
 		return
 	}
 
-	if event.EventType != "PlateNumberRecognition" {
-		slog.Debug("Ignoring non-plate event", "event_type", event.EventType)
+	if event.EventType != "PlateNumberRecognition" || event.EventName == "startTrack" {
+		//slog.Debug("Ignoring non-plate event", "event_type", event.EventType)
 		return
 	}
 
@@ -147,17 +147,53 @@ func (m *MQTTClient) processMessage(topic string, payload []byte) {
 		"image_size", len(event.JpegImage),
 		"free_out", doorCfg.FreeOut)
 
-	// Если включён свободный выезд и событие detect - открываем дверь для любого номера
-	if doorCfg.FreeOut && event.EventName == "detect" && event.Smd.CamType == "out" {
-		slog.Info("Free out enabled, opening door for any plate", "door_id", doorID)
-		m.openDoor(doorCfg, doorID)
-		// Продолжаем обработку для отправки уведомлений, если номер есть в базе
-	}
+	//// Если включён свободный выезд и событие detect - открываем дверь для любого номера
+	//if doorCfg.FreeOut && event.EventName == "detect" && event.Smd.CamType == "out" {
+	//	slog.Info("Free out enabled, opening door for any plate", "door_id", doorID)
+	//	m.openDoor(doorCfg, doorID)
+	//	// Продолжаем обработку для отправки уведомлений, если номер есть в базе
+	//}
 
 	// Получаем все записи автомобилей с этим номером
-	cars, err := m.storage.GetCarsByPlateNumber(plateNumber)
-	if err != nil {
-		slog.Error("Failed to get cars by plate", "error", err)
+
+	cars, car_err := m.storage.GetCarsByPlateNumber(plateNumber)
+	slog.Info("Do", event.EventName)
+	if event.EventName == "detect" {
+		slog.Info("event.Smd.CamType", event.Smd.CamType)
+		switch event.Smd.CamType {
+		case "out":
+			slog.Info("Do out")
+			if doorCfg.FreeOut {
+				slog.Info("Do out doorCfg.FreeOut")
+				slog.Info("Free out enabled, opening door for any plate", "door_id", doorID, "plate", plateNumber)
+				m.openDoor(doorCfg, doorID)
+			} else {
+				slog.Info("Do out !doorCfg.FreeOut")
+				for _, car := range cars {
+					if car.AutoOpen {
+						slog.Info("Auto open detected for out car, opening door", "door_id", doorID, "plate", plateNumber)
+						m.openDoor(doorCfg, doorID)
+						break
+					}
+				}
+			}
+		case "in":
+			slog.Info("Do in")
+			for _, car := range cars {
+				if car.AutoOpen {
+					slog.Info("Auto open detected for in car, opening door", "door_id", doorID, "plate", plateNumber)
+					m.openDoor(doorCfg, doorID)
+					break
+				}
+			}
+		default:
+			slog.Info("Unknow camtype for event detect", event.Smd.CamType)
+			return
+		}
+	}
+
+	if car_err != nil {
+		slog.Error("Failed to get cars by plate", "error", car_err)
 		return
 	}
 
@@ -166,20 +202,13 @@ func (m *MQTTClient) processMessage(topic string, payload []byte) {
 		return
 	}
 
-	// Обрабатываем события для найденных машин
 	for _, car := range cars {
 		switch event.EventName {
 		case "detect":
-			// auto_open срабатывает только если free_out выключена (иначе дверь уже открыта)
-			if !doorCfg.FreeOut && car.AutoOpen {
-				slog.Info("Auto open detected, opening door", "door_id", doorID, "plate", plateNumber, "address_id", car.AddressID)
-				m.openDoor(doorCfg, doorID)
-			}
 			// Уведомления отправляем всегда, если включены
 			if car.NotifyOnDetect {
 				m.sendNotification(car.AddressID, fmt.Sprintf("📸 автомобиль %s (%s)", plateNumber, car.Comment))
 			}
-
 		case "endTrack":
 			camType := event.Smd.CamType
 			if camType == "in" && car.NotifyOnEntry {
