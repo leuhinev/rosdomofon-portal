@@ -24,7 +24,7 @@ function setAddresses(addressesData) {
 
 async function loadKeys() {
     try {
-        const keys = await api.request('/api/keys');
+        const keys = await api.request('./api/keys');
         cachedKeys = keys;
         const container = document.getElementById('keys-list');
         if (keys.length === 0) {
@@ -135,7 +135,7 @@ async function addKey(addressesList) {
         submitBtn.disabled = true;
 
         try {
-            const result = await api.request('/api/keys', { method: 'POST', body: JSON.stringify(data) });
+            const result = await api.request('./api/keys', { method: 'POST', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Ключ добавлен'), false);
             await loadKeys();
@@ -204,7 +204,7 @@ async function editKey(id) {
         submitBtn.disabled = true;
 
         try {
-            const result = await api.request(`/api/keys/${key.ID}`, { method: 'PUT', body: JSON.stringify(data) });
+            const result = await api.request(`./api/keys/${key.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
             await loadKeys();
@@ -225,7 +225,7 @@ async function editKey(id) {
 
 async function deleteKey(id) {
     try {
-        const result = await api.request(`/api/keys/${id}`, { method: 'DELETE' });
+        const result = await api.request(`./api/keys/${id}`, { method: 'DELETE' });
         showMessage('✅ ' + (result.message || 'Ключ удалён'), false);
         await loadKeys();
     } catch (err) {

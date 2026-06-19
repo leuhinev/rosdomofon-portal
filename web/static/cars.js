@@ -19,7 +19,7 @@ function setAddresses(addressesData) {
 
 async function loadCars() {
     try {
-        const cars = await api.request('/api/cars');
+        const cars = await api.request('./api/cars');
         cachedCars = cars;
         const container = document.getElementById('cars-list');
         if (cars.length === 0) {
@@ -116,7 +116,7 @@ async function extendCar(id) {
 
     if (days) {
         try {
-            const result = await api.request(`/api/cars/extend/${id}`, {
+            const result = await api.request(`./api/cars/extend/${id}`, {
                 method: 'POST',
                 body: JSON.stringify({ additional_days: days })
             });
@@ -247,7 +247,7 @@ async function addCar(addressesList) {
         submitBtn.disabled = true;
 
         try {
-            const result = await api.request('/api/cars', { method: 'POST', body: JSON.stringify(data) });
+            const result = await api.request('./api/cars', { method: 'POST', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Автомобиль добавлен'), false);
             await loadCars();
@@ -347,7 +347,7 @@ async function editCar(id) {
         submitBtn.disabled = true;
 
         try {
-            const result = await api.request(`/api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
+            const result = await api.request(`./api/cars/${car.ID}`, { method: 'PUT', body: JSON.stringify(data) });
             closeModal();
             showMessage('✅ ' + (result.message || 'Изменения сохранены'), false);
             await loadCars();
@@ -368,7 +368,7 @@ async function editCar(id) {
 
 async function deleteCar(id) {
     try {
-        const result = await api.request(`/api/cars/${id}`, { method: 'DELETE' });
+        const result = await api.request(`./api/cars/${id}`, { method: 'DELETE' });
         showMessage('✅ ' + (result.message || 'Автомобиль удалён'), false);
         await loadCars();
     } catch (err) {

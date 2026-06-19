@@ -148,7 +148,7 @@ func (m *MQTTClient) processMessage(topic string, payload []byte) {
 		"free_out", doorCfg.FreeOut)
 
 	// Если включён свободный выезд и событие detect - открываем дверь для любого номера
-	if doorCfg.FreeOut && event.EventName == "detect" {
+	if doorCfg.FreeOut && event.EventName == "detect" && event.Smd.CamType == "out" {
 		slog.Info("Free out enabled, opening door for any plate", "door_id", doorID)
 		m.openDoor(doorCfg, doorID)
 		// Продолжаем обработку для отправки уведомлений, если номер есть в базе

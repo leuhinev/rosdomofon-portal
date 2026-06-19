@@ -19,7 +19,7 @@ function hideLoading() {
 
 async function loadAddresses() {
     console.log('app.js: loading addresses...');
-    const data = await api.request('/api/user/addresses');
+    const data = await api.request('./api/user/addresses');
     console.log('app.js: addresses loaded:', data.length, 'addresses');
     addresses = data;
     setCarsAddresses(addresses);
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             submitBtn.innerHTML = '<span class="loading"></span> Отправка...';
 
             try {
-                const response = await fetch('/api/auth/send-code', {
+                const response = await fetch('./api/auth/send-code', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ phone: fullPhone })
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             submitBtn.innerHTML = '<span class="loading"></span> Проверка...';
 
             try {
-                const response = await fetch('/api/auth/verify', {
+                const response = await fetch('./api/auth/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ phone: fullPhone, code })

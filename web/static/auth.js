@@ -29,7 +29,7 @@ function logout() {
 async function webViewAuth(actionToken) {
     console.log('WebView auth with token:', actionToken.substring(0, 8) + '...');
     try {
-        const response = await fetch('/api/auth/webview', {
+        const response = await fetch('./api/auth/webview', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action_token: actionToken })
