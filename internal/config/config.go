@@ -38,10 +38,11 @@ type MemcachedConfig struct {
 }
 
 type RosdomofonConfig struct {
-	Email               string   `mapstructure:"email"`
-	Password            string   `mapstructure:"password"`
-	SyncIntervalMinutes int      `mapstructure:"sync_interval_minutes"`
-	ServiceTypes        []string `mapstructure:"service_types"`
+	Email                  string   `mapstructure:"email"`
+	Password               string   `mapstructure:"password"`
+	SyncIntervalMinutes    int      `mapstructure:"sync_interval_minutes"`
+	ServiceTypes           []string `mapstructure:"service_types"`
+	ExpiryNotificationDays int      `mapstructure:"expiry_notification_days"`
 }
 
 type MQTTConfig struct {

@@ -137,7 +137,7 @@ func (s *Storage) GetCarsByAddressIDs(addressIDs []int) ([]Car, error) {
 	return cars, nil
 }
 
-// GetCarsByPlateNumber возвращает только активные записи автомобилей с указанным номером (срок действия не истек)
+// GetCarsByPlateNumber возвращает только активные записи (срок не истек)
 func (s *Storage) GetCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
@@ -193,7 +193,7 @@ func (s *Storage) GetCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	return cars, nil
 }
 
-// GetAllCarsByPlateNumber возвращает все записи (включая истекшие) - для административных целей
+// GetAllCarsByPlateNumber возвращает все записи (включая истекшие)
 func (s *Storage) GetAllCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
@@ -234,6 +234,62 @@ func (s *Storage) GetAllCarsByPlateNumber(plateNumber string) ([]Car, error) {
 			AddressID:      dbCar.AddressID,
 			PlateID:        dbCar.PlateID,
 			PlateNumber:    p.PlateNumber,
+			Comment:        dbCar.Comment,
+			AutoOpen:       dbCar.AutoOpen,
+			NotifyOnDetect: dbCar.NotifyOnDetect,
+			NotifyOnEntry:  dbCar.NotifyOnEntry,
+			NotifyOnExit:   dbCar.NotifyOnExit,
+			ExpiresAt:      time.Unix(dbCar.ExpiresAt, 0),
+			CreatedAt:      time.Unix(dbCar.CreatedAt, 0),
+			UpdatedAt:      time.Unix(dbCar.UpdatedAt, 0),
+			Photos:         photos,
+		}
+	}
+	return cars, nil
+}
+
+// GetCarsExpiringSoon возвращает активные автомобили, у которых срок истекает в течение указанного количества дней (от today до today+days)
+func (s *Storage) GetCarsExpiringSoon(days int) ([]Car, error) {
+	now := time.Now()
+	// Начало дня (00:00) сегодня
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	// Конец дня через days дней
+	end := start.AddDate(0, 0, days+1) // +1 чтобы включить весь последний день
+
+	startUnix := start.Unix()
+	endUnix := end.Unix()
+
+	var dbCars []UserCar
+	// Выбираем активные записи, у которых expires_at между start и end (включительно)
+	result := s.DB.Where("expires_at >= ? AND expires_at < ? AND expires_at > ?", startUnix, endUnix, now.Unix()).Find(&dbCars)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	cars := make([]Car, len(dbCars))
+	for i, dbCar := range dbCars {
+		var plate PlateNumber
+		s.DB.First(&plate, dbCar.PlateID)
+
+		var dbPhotos []CarPhotoDB
+		s.DB.Where("plate_id = ?", plate.ID).Order("is_main DESC").Find(&dbPhotos)
+
+		photos := make([]CarPhotoDB, len(dbPhotos))
+		for j, p := range dbPhotos {
+			photos[j] = CarPhotoDB{
+				ID:        p.ID,
+				PlateID:   p.PlateID,
+				PhotoData: p.PhotoData,
+				IsMain:    p.IsMain,
+				CreatedAt: p.CreatedAt,
+			}
+		}
+
+		cars[i] = Car{
+			ID:             dbCar.ID,
+			AddressID:      dbCar.AddressID,
+			PlateID:        dbCar.PlateID,
+			PlateNumber:    plate.PlateNumber,
 			Comment:        dbCar.Comment,
 			AutoOpen:       dbCar.AutoOpen,
 			NotifyOnDetect: dbCar.NotifyOnDetect,
