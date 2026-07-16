@@ -66,6 +66,10 @@ func validatePlateFormat(plate string) (bool, string) {
 	return true, ""
 }
 
+func endOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
+}
+
 func (h *CarsHandler) GetCars(w http.ResponseWriter, r *http.Request) {
 	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
 
@@ -76,7 +80,6 @@ func (h *CarsHandler) GetCars(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Добавляем информацию об адресе для каждого автомобиля
 	type CarWithAddress struct {
 		storage.Car
 		Address string `json:"address"`
@@ -120,7 +123,6 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверяем, что address_id принадлежит пользователю
 	allowedAddresses := r.Context().Value(middleware.AddressIDsKey).([]int)
 	addressAllowed := false
 	for _, aid := range allowedAddresses {
@@ -135,7 +137,6 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем строку адреса для валидации
 	addressStr := h.memoryDB.GetAddressByAddressID(req.AddressID)
 	if addressStr == "" {
 		slog.Error("address_id not found", "address_id", req.AddressID)
@@ -186,6 +187,9 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 	days := map[string]int{"day": 1, "week": 7, "month": 30, "3months": 90, "6months": 180, "year": 365}
 	daysCount := days[req.ExpiresInDays]
 
+	// Срок действия: конец дня через (daysCount-1) дней от текущего момента
+	expiry := endOfDay(time.Now().AddDate(0, 0, daysCount-1))
+
 	car := &storage.Car{
 		AddressID:      req.AddressID,
 		PlateNumber:    normalizedPlate,
@@ -194,7 +198,7 @@ func (h *CarsHandler) CreateCar(w http.ResponseWriter, r *http.Request) {
 		NotifyOnDetect: req.NotifyOnDetect,
 		NotifyOnEntry:  req.NotifyOnEntry,
 		NotifyOnExit:   req.NotifyOnExit,
-		ExpiresAt:      time.Now().AddDate(0, 0, daysCount),
+		ExpiresAt:      expiry,
 	}
 
 	if err := h.storage.CreateCar(car); err != nil {
@@ -288,11 +292,11 @@ func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
 
 	cars, _ := h.storage.GetCarsByAddressIDs(allowedAddresses)
 	var addressID int
-	var carFound *storage.Car
+	//var carFound *storage.Car
 	for _, car := range cars {
 		if car.ID == id {
 			addressID = car.AddressID
-			carFound = &car
+			//carFound = &car
 			break
 		}
 	}
@@ -302,12 +306,8 @@ func (h *CarsHandler) ExtendCar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	daysUntilExpiry := int(time.Until(carFound.ExpiresAt).Hours() / 24)
-	if daysUntilExpiry > 7 {
-		http.Error(w, `{"error":"Продлить срок можно только за 7 дней до истечения. До истечения осталось `+strconv.Itoa(daysUntilExpiry)+` дней"}`, http.StatusBadRequest)
-		return
-	}
-
+	// Продлеваем срок действия. Если срок истек, мы все равно продлеваем от текущего момента.
+	// Поэтому не проверяем дни до истечения, просто вызываем обновление.
 	if err := h.storage.ExtendCarExpiry(id, addressID, req.AdditionalDays); err != nil {
 		slog.Error("failed to extend car", "error", err)
 		http.Error(w, `{"error":"Не удалось продлить срок действия"}`, http.StatusInternalServerError)

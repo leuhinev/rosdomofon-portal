@@ -185,7 +185,7 @@ async function addCar(addressesList) {
             <div class="form-group">
                 <label for="expiry">⏰ Срок действия:</label>
                 <select id="expiry" required>
-                    <option value="day">1 день</option>
+                    <option value="day">1 день (текущие сутки до 23:59)</option>
                     <option value="week">1 неделя</option>
                     <option value="month">1 месяц</option>
                     <option value="3months">3 месяца</option>

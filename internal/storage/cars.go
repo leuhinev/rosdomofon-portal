@@ -21,6 +21,10 @@ type Car struct {
 	Photos         []CarPhotoDB
 }
 
+func endOfDay(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 59, 999999999, t.Location())
+}
+
 func (s *Storage) GetOrCreatePlateNumber(plateNumber string) (int, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
@@ -137,7 +141,6 @@ func (s *Storage) GetCarsByAddressIDs(addressIDs []int) ([]Car, error) {
 	return cars, nil
 }
 
-// GetCarsByPlateNumber возвращает только активные записи (срок не истек)
 func (s *Storage) GetCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
@@ -193,7 +196,6 @@ func (s *Storage) GetCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	return cars, nil
 }
 
-// GetAllCarsByPlateNumber возвращает все записи (включая истекшие)
 func (s *Storage) GetAllCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	var plate PlateNumber
 	result := s.DB.Where("plate_number = ?", plateNumber).First(&plate)
@@ -248,19 +250,15 @@ func (s *Storage) GetAllCarsByPlateNumber(plateNumber string) ([]Car, error) {
 	return cars, nil
 }
 
-// GetCarsExpiringSoon возвращает активные автомобили, у которых срок истекает в течение указанного количества дней (от today до today+days)
 func (s *Storage) GetCarsExpiringSoon(days int) ([]Car, error) {
 	now := time.Now()
-	// Начало дня (00:00) сегодня
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	// Конец дня через days дней
-	end := start.AddDate(0, 0, days+1) // +1 чтобы включить весь последний день
+	end := start.AddDate(0, 0, days+1)
 
 	startUnix := start.Unix()
 	endUnix := end.Unix()
 
 	var dbCars []UserCar
-	// Выбираем активные записи, у которых expires_at между start и end (включительно)
 	result := s.DB.Where("expires_at >= ? AND expires_at < ? AND expires_at > ?", startUnix, endUnix, now.Unix()).Find(&dbCars)
 	if result.Error != nil {
 		return nil, result.Error
@@ -317,6 +315,7 @@ func (s *Storage) UpdateCar(id int, addressID int, comment string, autoOpen, not
 	return result.Error
 }
 
+// ExtendCarExpiry продлевает срок действия автомобиля на additionalDays дней от текущего момента до конца дня
 func (s *Storage) ExtendCarExpiry(id int, addressID int, additionalDays int) error {
 	var car UserCar
 	result := s.DB.Where("id = ? AND address_id = ?", id, addressID).First(&car)
@@ -324,7 +323,9 @@ func (s *Storage) ExtendCarExpiry(id int, addressID int, additionalDays int) err
 		return result.Error
 	}
 
-	newExpiry := time.Unix(car.ExpiresAt, 0).AddDate(0, 0, additionalDays)
+	// Новая дата истечения = конец дня через additionalDays дней от текущего момента
+	newExpiry := endOfDay(time.Now().AddDate(0, 0, additionalDays))
+
 	result = s.DB.Model(&UserCar{}).
 		Where("id = ? AND address_id = ?", id, addressID).
 		Update("expires_at", newExpiry.Unix())
