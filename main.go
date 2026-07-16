@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"embed"
+	"github.com/bradfitz/gomemcache/memcache"
 	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"rosdomofon-portal/internal/notifier"
 	"strconv"
 	"syscall"
 	"time"
@@ -275,6 +277,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	mcClient := memcache.New(cfg.Memcached.Address)
+	notifier := notifier.NewNotifier(db, memDB, rosClient, mcClient, cfg.Rosdomofon)
+	go notifier.Start()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
